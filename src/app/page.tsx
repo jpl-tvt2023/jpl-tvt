@@ -113,11 +113,24 @@ export default function Home() {
               View Standings
             </Link>
             <Link
+              href="/playoffs"
+              className="w-full sm:w-auto rounded-full border border-white/20 bg-white/5 px-8 py-4 text-lg font-semibold text-white hover:bg-white/10 transition"
+            >
+              View Playoffs
+            </Link>
+            <Link
               href="/rules"
               className="w-full sm:w-auto rounded-full border border-white/20 bg-white/5 px-8 py-4 text-lg font-semibold text-white hover:bg-white/10 transition"
             >
               View Rules
             </Link>
+          </div>
+
+          <div className="mt-10 rounded-2xl bg-gradient-to-r from-purple-600/30 to-orange-500/30 border border-white/10 px-8 py-6 text-center max-w-2xl mx-auto">
+            <h3 className="text-xl font-bold text-white mb-2">Get Started</h3>
+            <p className="text-gray-300 text-sm">
+              Please contact the TVT administrators to receive your login credentials. Upon your first sign-in, you will be prompted to update your password for security purposes.
+            </p>
           </div>
         </div>
       </header>
@@ -182,15 +195,7 @@ export default function Home() {
         </div>
       </section>
 
-      {/* CTA Section */}
-      <section className="relative z-10 mx-auto max-w-7xl px-6 py-24">
-        <div className="rounded-3xl bg-gradient-to-r from-purple-600 to-orange-500 p-12 text-center">
-          <h2 className="text-3xl font-bold text-white mb-4">Get Started</h2>
-          <p className="text-white/80 max-w-xl mx-auto">
-            Please contact the TVT administrators to receive your login credentials. Upon your first sign-in, you will be prompted to update your password for security purposes.
-          </p>
-        </div>
-      </section>
+
 
       {/* Footer */}
       <footer className="border-t border-white/10 bg-slate-900/50">
