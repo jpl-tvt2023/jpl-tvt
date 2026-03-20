@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db, teams, groups, players, fixtures, results, gameweekChips, type Team, type Group, type Player, type Fixture, type Result, type Gameweek } from "@/lib/db";
+import { db, teams, groups, players, fixtures, results, gameweekChips, gameweeks, type Team, type Group, type Player, type Fixture, type Result, type Gameweek } from "@/lib/db";
 import { getAllCachedScores } from "@/lib/fpl-cache";
+import { calculateTeamGameweekScore } from "@/lib/fpl";
 
 type FixtureWithResult = Fixture & { result: Result | null; gameweek: Gameweek };
 
@@ -82,18 +83,55 @@ export async function GET(request: NextRequest) {
     const teamAbbrMap = new Map<string, string>(allTeamsUnfiltered.map(t => [t.id, t.abbreviation]));
 
     // Build per-GW, per-player hits map for hit penalty calculation (-1 league pt per GW a player exceeds 12 hits)
-    // Reads FPL cache files for GW 1-30; returns {} gracefully for unprocessed GWs
+    // First try Redis cache; if empty, fetch from FPL API for processed GWs
     const playerGwHitsMap = new Map<string, Map<number, number>>(); // fplId → gwNumber → transferHits
-    for (let gw = 1; gw <= 30; gw++) {
+
+    // Collect all unique fplIds from all teams
+    const allFplIds = new Set<string>();
+    for (const t of allTeamsUnfiltered) {
+      for (const p of t.players) {
+        allFplIds.add(p.fplId);
+      }
+    }
+
+    // Determine which GWs (1-30) have been processed (have at least one result)
+    const processedGws = new Set<number>();
+    for (const t of allTeamsUnfiltered) {
+      for (const f of [...t.homeFixtures, ...t.awayFixtures]) {
+        if (f.result && f.gameweek.number <= 30) {
+          processedGws.add(f.gameweek.number);
+        }
+      }
+    }
+
+    for (const gw of processedGws) {
+      // Try cache first
       const gwCache = await getAllCachedScores(gw);
       const suffix = `_gw${gw}`;
-      for (const [key, data] of Object.entries(gwCache)) {
-        if (key.endsWith(suffix)) {
-          const fplId = key.slice(0, -suffix.length);
-          if (!playerGwHitsMap.has(fplId)) {
-            playerGwHitsMap.set(fplId, new Map());
+
+      if (Object.keys(gwCache).length > 0) {
+        // Cache has data — use it
+        for (const [key, data] of Object.entries(gwCache)) {
+          if (key.endsWith(suffix)) {
+            const fplId = key.slice(0, -suffix.length);
+            if (!playerGwHitsMap.has(fplId)) {
+              playerGwHitsMap.set(fplId, new Map());
+            }
+            playerGwHitsMap.get(fplId)!.set(gw, data.transferHits);
           }
-          playerGwHitsMap.get(fplId)!.set(gw, data.transferHits);
+        }
+      } else {
+        // Cache empty — fetch from FPL API (also populates cache for next time)
+        for (const fplId of allFplIds) {
+          try {
+            const score = await calculateTeamGameweekScore(fplId, gw);
+            if (!playerGwHitsMap.has(fplId)) {
+              playerGwHitsMap.set(fplId, new Map());
+            }
+            playerGwHitsMap.get(fplId)!.set(gw, score.transferHits);
+          } catch {
+            // FPL API may fail for some players/GWs — skip gracefully
+          }
         }
       }
     }
