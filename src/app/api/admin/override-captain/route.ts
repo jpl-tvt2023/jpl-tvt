@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db, users, teams, players, gameweeks, gameweekCaptains, auditLogs } from "@/lib/db";
+import { db, teams, players, gameweeks, gameweekCaptains, auditLogs } from "@/lib/db";
 import { eq, and } from "drizzle-orm";
 import { generateId } from "@/lib/id";
 
@@ -163,14 +163,9 @@ export async function POST(request: NextRequest) {
  */
 export async function GET(request: NextRequest) {
   try {
-    // Check if user is admin
-    const userId = request.cookies.get("userId")?.value;
-    if (!userId) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-    }
-
-    const adminUser = await db.select().from(users).where(eq(users.id, userId));
-    if (!adminUser[0]?.isAdmin) {
+    // Admin verified by middleware; defense-in-depth check
+    const sessionType = request.headers.get("x-session-type");
+    if (sessionType !== "admin") {
       return NextResponse.json({ error: "Admin access required" }, { status: 403 });
     }
 
