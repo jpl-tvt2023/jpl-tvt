@@ -1,0 +1,241 @@
+// TVT Scoring Engine
+// Implements the scoring rules for TVT Fantasy Super League
+
+import { calculateTeamGameweekScore } from "./fpl";
+
+export interface PlayerScore {
+  fplScore: number;
+  transferHits: number;
+  isCaptain: boolean;
+}
+
+export interface TVTTeamScore {
+  player1Score: number;
+  player2Score: number;
+  player1Hits: number;
+  player2Hits: number;
+  captainId: string;
+  totalScore: number;
+  doubledCaptainScore: number;
+}
+
+export interface MatchResult {
+  homeScore: number;
+  awayScore: number;
+  homeMatchPoints: number; // 2 = win, 1 = draw, 0 = loss
+  awayMatchPoints: number;
+  margin: number;
+  homeGotBonus: boolean;
+  awayGotBonus: boolean;
+}
+
+/**
+ * Calculate TVT team score from player scores (synchronous version)
+ * Team Score = Combined score of both members
+ * Captain's score (including their transfer hits) is doubled
+ */
+export function calculateTVTTeamScore(players: PlayerScore[]): number {
+  let totalScore = 0;
+
+  for (const player of players) {
+    const netScore = player.fplScore - player.transferHits;
+    if (player.isCaptain) {
+      // Captain's net score (fplScore - transferHits) is doubled
+      totalScore += netScore * 2;
+    } else {
+      totalScore += netScore;
+    }
+  }
+
+  return totalScore;
+}
+
+/**
+ * Calculate TVT team score for a gameweek (async version using FPL API)
+ * Team Score = Combined score of both members minus transfer hits
+ * Captain's score and hits are doubled
+ */
+export async function calculateTVTTeamScoreAsync(
+  player1FplId: string,
+  player2FplId: string,
+  captainPlayerId: string, // Which player is captain (player1 or player2's ID)
+  gameweek: number
+): Promise<TVTTeamScore> {
+  const [p1Score, p2Score] = await Promise.all([
+    calculateTeamGameweekScore(player1FplId, gameweek),
+    calculateTeamGameweekScore(player2FplId, gameweek),
+  ]);
+
+  const isCaptain1 = captainPlayerId === player1FplId;
+  
+  // Captain's score and hits are doubled
+  const player1Final = isCaptain1 
+    ? (p1Score.netScore * 2) 
+    : p1Score.netScore;
+  
+  const player2Final = !isCaptain1 
+    ? (p2Score.netScore * 2) 
+    : p2Score.netScore;
+
+  const totalScore = player1Final + player2Final;
+
+  return {
+    player1Score: p1Score.points,
+    player2Score: p2Score.points,
+    player1Hits: p1Score.transferHits,
+    player2Hits: p2Score.transferHits,
+    captainId: captainPlayerId,
+    totalScore,
+    doubledCaptainScore: isCaptain1 
+      ? p1Score.netScore * 2 
+      : p2Score.netScore * 2,
+  };
+}
+
+/**
+ * Determine match result between two teams
+ * Win = 2 points, Draw = 1 point, Loss = 0 points
+ */
+export function determineMatchResult(
+  homeScore: number,
+  awayScore: number,
+  isDoublePointerHome: boolean = false,
+  isDoublePointerAway: boolean = false
+): MatchResult {
+  const margin = Math.abs(homeScore - awayScore);
+  
+  let homeMatchPoints: number;
+  let awayMatchPoints: number;
+
+  if (homeScore > awayScore) {
+    homeMatchPoints = 2;
+    awayMatchPoints = 0;
+  } else if (awayScore > homeScore) {
+    homeMatchPoints = 0;
+    awayMatchPoints = 2;
+  } else {
+    homeMatchPoints = 1;
+    awayMatchPoints = 1;
+  }
+
+  // Double Pointer chip doubles match points
+  if (isDoublePointerHome) {
+    homeMatchPoints *= 2;
+  }
+  if (isDoublePointerAway) {
+    awayMatchPoints *= 2;
+  }
+
+  // Bonus point: earned if team wins by 75+ points
+  // Note: Highest margin check should be done at group level
+  const homeGotBonus = homeScore - awayScore >= 75;
+  const awayGotBonus = awayScore - homeScore >= 75;
+
+  return {
+    homeScore,
+    awayScore,
+    homeMatchPoints,
+    awayMatchPoints,
+    margin,
+    homeGotBonus,
+    awayGotBonus,
+  };
+}
+
+/**
+ * Check if negative hit cap is exceeded
+ * Max -12 points per player. Exceeding triggers -1 league point deduction
+ */
+export function checkNegativeHitCap(hits: number): {
+  exceeded: boolean;
+  penalty: number;
+} {
+  const MAX_NEGATIVE_HITS = 12;
+  return {
+    exceeded: hits > MAX_NEGATIVE_HITS,
+    penalty: hits > MAX_NEGATIVE_HITS ? -1 : 0,
+  };
+}
+
+/**
+ * Calculate chip eligibility
+ * - Double Pointer: Rank 1-8 use only against Top 8, Rank 9-16 only against higher-ranked
+ * - Chips reset between Set 1 (GW1-15) and Set 2 (GW16-30)
+ */
+export function canUseDoublePointer(
+  teamRank: number,
+  opponentRank: number,
+  gameweek: number
+): boolean {
+  // Playoffs (GW31+) have no chip restrictions
+  if (gameweek >= 31) return true;
+
+  if (teamRank <= 8) {
+    // Top 8 can only use against other Top 8 teams
+    return opponentRank <= 8;
+  } else {
+    // Rank 9-16 can only use against higher-ranked teams (lower rank number)
+    return opponentRank < teamRank;
+  }
+}
+
+/**
+ * Get chip set based on gameweek
+ * Set 1: GW1-15, Set 2: GW16-30
+ */
+export function getChipSet(gameweek: number): 1 | 2 | "playoffs" {
+  if (gameweek <= 15) return 1;
+  if (gameweek <= 30) return 2;
+  return "playoffs";
+}
+
+/**
+ * Check captaincy chip availability
+ * Each player has 15 chips in League Stage (GW1-30)
+ * No limit in Playoffs (GW31-38)
+ */
+export function canBeCaptain(
+  chipsUsed: number,
+  gameweek: number
+): boolean {
+  const MAX_CAPTAINCY_CHIPS = 15;
+  
+  // No limit in playoffs
+  if (gameweek >= 31) return true;
+  
+  return chipsUsed < MAX_CAPTAINCY_CHIPS;
+}
+
+/**
+ * Tiebreaker comparison for League Stage
+ * 1) Overall Points, 2) Max Wins, 3) Head-to-Head, 4) Bonus Points
+ */
+export interface TeamStanding {
+  teamId: string;
+  leaguePoints: number;
+  wins: number;
+  headToHeadRecord: Record<string, number>; // teamId -> points earned against them
+  bonusPoints: number;
+}
+
+export function compareTiebreaker(a: TeamStanding, b: TeamStanding): number {
+  // 1) Overall Points
+  if (a.leaguePoints !== b.leaguePoints) {
+    return b.leaguePoints - a.leaguePoints;
+  }
+  
+  // 2) Max Wins
+  if (a.wins !== b.wins) {
+    return b.wins - a.wins;
+  }
+  
+  // 3) Head-to-Head
+  const aH2H = a.headToHeadRecord[b.teamId] || 0;
+  const bH2H = b.headToHeadRecord[a.teamId] || 0;
+  if (aH2H !== bH2H) {
+    return bH2H - aH2H;
+  }
+  
+  // 4) Bonus Points
+  return b.bonusPoints - a.bonusPoints;
+}

@@ -1,0 +1,107 @@
+import { NextRequest, NextResponse } from "next/server";
+import { db, users, teams } from "@/lib/db";
+import { eq } from "drizzle-orm";
+import bcrypt from "bcryptjs";
+import { createSession, SESSION_COOKIE_NAME, SESSION_COOKIE_OPTIONS } from "@/lib/auth";
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const { identifier, password } = body;
+
+    if (!identifier || !password) {
+      return NextResponse.json(
+        { error: "Login ID and password are required" },
+        { status: 400 }
+      );
+    }
+
+    // Check if it's an admin login (contains @)
+    const isEmailLogin = identifier.includes("@");
+
+    if (isEmailLogin) {
+      // Admin login via email
+      const userList = await db.select().from(users).where(eq(users.email, identifier.toLowerCase()));
+      const user = userList[0];
+
+      if (!user) {
+        return NextResponse.json(
+          { error: "Invalid credentials" },
+          { status: 401 }
+        );
+      }
+
+      // Verify password
+      const isValid = await bcrypt.compare(password, user.password);
+      if (!isValid) {
+        return NextResponse.json(
+          { error: "Invalid credentials" },
+          { status: 401 }
+        );
+      }
+
+      const response = NextResponse.json({
+        success: true,
+        user: {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          isAdmin: true,
+          mustChangePassword: false,
+        },
+        redirectTo: "/admin",
+      });
+
+      // Single signed session cookie — replaces userId/isAdmin cookies
+      const token = await createSession(user.id, "admin");
+      response.cookies.set(SESSION_COOKIE_NAME, token, SESSION_COOKIE_OPTIONS);
+
+      return response;
+    } else {
+      // Team login via team name
+      const teamList = await db.select().from(teams).where(eq(teams.name, identifier));
+      const team = teamList[0];
+
+      if (!team) {
+        return NextResponse.json(
+          { error: "Invalid credentials" },
+          { status: 401 }
+        );
+      }
+
+      // Verify password
+      const isValid = await bcrypt.compare(password, team.password);
+      if (!isValid) {
+        return NextResponse.json(
+          { error: "Invalid credentials" },
+          { status: 401 }
+        );
+      }
+
+      const response = NextResponse.json({
+        success: true,
+        team: {
+          id: team.id,
+          name: team.name,
+          abbreviation: team.abbreviation,
+          groupId: team.groupId,
+          isAdmin: false,
+          mustChangePassword: team.mustChangePassword,
+        },
+        redirectTo: team.mustChangePassword ? "/change-password" : "/",
+      });
+
+      // Single signed session cookie — replaces teamId/isAdmin cookies
+      const token = await createSession(team.id, "team");
+      response.cookies.set(SESSION_COOKIE_NAME, token, SESSION_COOKIE_OPTIONS);
+
+      return response;
+    }
+  } catch (error) {
+    console.error("Sign in error:", error);
+    return NextResponse.json(
+      { error: "Sign in failed" },
+      { status: 500 }
+    );
+  }
+}

@@ -1,0 +1,1030 @@
+"use client";
+
+import { useState, useEffect, useCallback } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+
+// Types
+interface DashboardData {
+  team: {
+    id: string;
+    name: string;
+    abbreviation: string;
+    group: string;
+    leaguePoints: number;
+    bonusPoints: number;
+  };
+  deadline: {
+    gameweek: number;
+    timestamp: string | null;
+  };
+  upcomingFixture: {
+    isHome: boolean;
+    opponent: {
+      id: string;
+      name: string;
+      abbreviation: string;
+      players: { name: string; fplId: string; fplUrl: string }[];
+    };
+    gameweek: number;
+  } | null;
+  upcomingCaptainSubmitted: boolean;
+  upcomingChip: { type: string; chipName: string } | null;
+  lastGwResult: {
+    gameweek: number;
+    result: "W" | "D" | "L";
+    myScore: number;
+    oppScore: number;
+    gotBonus: boolean;
+    isHome: boolean;
+    myTeamName: string;
+    myTeamAbbr: string;
+    opponent: string;
+    opponentAbbr: string;
+    hasMyCaptainData: boolean;
+    hasOppCaptainData: boolean;
+    myPlayerScores: { name: string; isCaptain: boolean; fplScore: number; transferHits: number; finalScore: number; isInferred?: boolean; fplId?: string; fplUrl?: string }[];
+    oppPlayerScores: { name: string; isCaptain: boolean; fplScore: number; transferHits: number; finalScore: number; isInferred?: boolean; fplId?: string; fplUrl?: string }[];
+  } | null;
+  // Add min/max completed GW for navigation
+  minCompletedGw?: number;
+  maxCompletedGw?: number;
+  recentForm: { gameweek: number; result: "W" | "D" | "L"; score: string; gotBonus: boolean }[];
+  seasonStats: {
+    played: number;
+    wins: number;
+    draws: number;
+    losses: number;
+    pointsFor: number;
+    pointsAgainst: number;
+    pointsDiff: number;
+    bonusPointsEarned: number;
+    chipPointsEarned: number;
+    highestScoringGW: { gameweek: number; score: number };
+    lowestScoringGW: { gameweek: number; score: number };
+    currentStreak: { type: "W" | "D" | "L"; count: number } | null;
+  };
+  leaguePosition: {
+    groupRank: number;
+    zone: "playoffs" | "challenger" | "eliminated";
+    pointsToTop: number;
+    miniTable: { rank: number; name: string; points: number; isCurrentTeam: boolean }[];
+  };
+  chipStatus: {
+    currentSet: 1 | 2 | "playoffs";
+    set1: {
+      doublePointer: { used: boolean; name: string };
+      challengeChip: { used: boolean; name: string };
+      winWin: { used: boolean; name: string };
+    };
+    set2: {
+      doublePointer: { used: boolean; name: string };
+      challengeChip: { used: boolean; name: string };
+      winWin: { used: boolean; name: string };
+    };
+  };
+  captaincyStatus: {
+    player1: { id: string; name: string; chipsUsed: number; chipsRemaining: number };
+    player2: { id: string; name: string; chipsUsed: number; chipsRemaining: number };
+    recentCaptains: { gameweek: number; playerName: string; score: number }[];
+  };
+  upcomingFixtures: { gameweek: number; opponent: string; isHome: boolean }[];
+  oppositeGroupTeams: { id: string; name: string; abbreviation: string }[];
+  announcementSettings: {
+    captainAnnouncementEnabled: boolean;
+    chipAnnouncementEnabled: boolean;
+  };
+  teamMembers: {
+    name: string;
+    fplId: string;
+    fplUrl: string;
+    fplHistoryUrl: string;
+    captaincyChipsUsed: number;
+  }[];
+}
+
+// Countdown Timer Component
+function DeadlineTimer({ deadline, gameweek }: { deadline: string | null; gameweek: number }) {
+  const [timeLeft, setTimeLeft] = useState<{ days: number; hours: number; minutes: number; seconds: number } | null>(null);
+  const [isExpired, setIsExpired] = useState(false);
+
+  useEffect(() => {
+    if (!deadline) return;
+
+    const calculateTimeLeft = () => {
+      const deadlineDate = new Date(deadline);
+      const now = new Date();
+      const diff = deadlineDate.getTime() - now.getTime();
+
+      if (diff <= 0) {
+        setIsExpired(true);
+        setTimeLeft(null);
+        return;
+      }
+
+      setIsExpired(false);
+      setTimeLeft({
+        days: Math.floor(diff / (1000 * 60 * 60 * 24)),
+        hours: Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60)),
+        minutes: Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60)),
+        seconds: Math.floor((diff % (1000 * 60)) / 1000),
+      });
+    };
+
+    calculateTimeLeft();
+    const interval = setInterval(calculateTimeLeft, 1000);
+    return () => clearInterval(interval);
+  }, [deadline]);
+
+  if (!deadline) {
+    return (
+      <div className="text-center text-gray-400">
+        No upcoming deadline
+      </div>
+    );
+  }
+
+  if (isExpired) {
+    return (
+      <div className="text-center">
+        <div className="text-red-400 text-xl font-bold">GW{gameweek} Deadline Passed</div>
+        <div className="text-gray-400 text-sm mt-1">Waiting for results...</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="text-center">
+      <div className="text-sm text-gray-400 mb-2">GW{gameweek} Deadline</div>
+      <div className="flex justify-center gap-3">
+        {timeLeft?.days !== undefined && timeLeft.days > 0 && (
+          <div className="bg-white/10 rounded-lg px-4 py-2">
+            <div className="text-2xl font-bold text-white">{timeLeft.days}</div>
+            <div className="text-xs text-gray-400">days</div>
+          </div>
+        )}
+        <div className="bg-white/10 rounded-lg px-4 py-2">
+          <div className="text-2xl font-bold text-white">{timeLeft?.hours.toString().padStart(2, "0")}</div>
+          <div className="text-xs text-gray-400">hrs</div>
+        </div>
+        <div className="bg-white/10 rounded-lg px-4 py-2">
+          <div className="text-2xl font-bold text-white">{timeLeft?.minutes.toString().padStart(2, "0")}</div>
+          <div className="text-xs text-gray-400">mins</div>
+        </div>
+        <div className="bg-white/10 rounded-lg px-4 py-2">
+          <div className="text-2xl font-bold text-yellow-400">{timeLeft?.seconds.toString().padStart(2, "0")}</div>
+          <div className="text-xs text-gray-400">secs</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Form Result Badge
+function FormBadge({ result, gotBonus }: { result: "W" | "D" | "L"; gotBonus: boolean }) {
+  const colors = {
+    W: "bg-green-500",
+    D: "bg-gray-500",
+    L: "bg-red-500",
+  };
+
+  return (
+    <div className="relative">
+      <div className={`w-8 h-8 ${colors[result]} rounded-full flex items-center justify-center text-white font-bold text-sm`}>
+        {result}
+      </div>
+      {gotBonus && (
+        <div className="absolute -top-1 -right-1 w-4 h-4 bg-yellow-500 rounded-full flex items-center justify-center text-xs text-slate-900 font-bold">
+          B
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Zone Badge
+function ZoneBadge({ zone }: { zone: "playoffs" | "challenger" | "eliminated" }) {
+  const config = {
+    playoffs: { bg: "bg-green-500/20", text: "text-green-400", label: "Playoffs" },
+    challenger: { bg: "bg-yellow-500/20", text: "text-yellow-400", label: "Challenger" },
+    eliminated: { bg: "bg-red-500/20", text: "text-red-400", label: "Eliminated" },
+  };
+
+  return (
+    <span className={`px-3 py-1 rounded-full text-xs font-semibold ${config[zone].bg} ${config[zone].text}`}>
+      {config[zone].label}
+    </span>
+  );
+}
+
+// Chip Status Badge
+function ChipBadge({ used, name }: { used: boolean; name: string }) {
+  return (
+    <div className={`flex items-center gap-2 px-3 py-2 rounded-lg ${used ? "bg-red-500/10" : "bg-green-500/10"}`}>
+      <span className={`w-2 h-2 rounded-full ${used ? "bg-red-400" : "bg-green-400"}`}></span>
+      <span className={`text-sm ${used ? "text-red-400" : "text-green-400"}`}>
+        {name}: {used ? "Used" : "Available"}
+      </span>
+    </div>
+  );
+}
+
+export default function DashboardPage() {
+  const router = useRouter();
+  const [data, setData] = useState<DashboardData | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [viewedGw, setViewedGw] = useState<number | null>(null);
+  
+  // Submission states
+  const [selectedCaptain, setSelectedCaptain] = useState<string>("");
+  const [selectedChip, setSelectedChip] = useState<string>("");
+  const [selectedChallengedTeam, setSelectedChallengedTeam] = useState<string>("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitMessage, setSubmitMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [showOpponentPlayers, setShowOpponentPlayers] = useState(false);
+
+  const fetchDashboard = useCallback(async (gw?: number) => {
+    try {
+      const url = gw ? `/api/team/dashboard?gw=${gw}` : "/api/team/dashboard";
+      const response = await fetch(url);
+      if (response.status === 401) {
+        router.push("/signin");
+        return;
+      }
+      if (!response.ok) {
+        throw new Error("Failed to fetch dashboard");
+      }
+      const dashboardData = await response.json();
+      setData(dashboardData);
+      if (dashboardData.lastGwResult) setViewedGw(dashboardData.lastGwResult.gameweek);
+    } catch (err) {
+      console.error("Dashboard error:", err);
+      setError("Failed to load dashboard. Please try again.");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [router]);
+
+  useEffect(() => {
+    fetchDashboard();
+  }, [fetchDashboard]);
+
+  // GW navigation handlers
+  const handlePrevGw = () => {
+    if (data && viewedGw && data.minCompletedGw && viewedGw > data.minCompletedGw) {
+      fetchDashboard(viewedGw - 1);
+    }
+  };
+  const handleNextGw = () => {
+    if (data && viewedGw && data.maxCompletedGw && viewedGw < data.maxCompletedGw) {
+      fetchDashboard(viewedGw + 1);
+    }
+  };
+
+  const handleSignOut = async () => {
+    await fetch("/api/auth/signout", { method: "POST" });
+    router.push("/signin");
+  };
+  
+  const handleCaptainSubmit = async () => {
+    if (!selectedCaptain || !data) return;
+    
+    setIsSubmitting(true);
+    setSubmitMessage(null);
+    
+    try {
+      const response = await fetch("/api/team/captain", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          playerId: selectedCaptain,
+          gameweek: data.deadline.gameweek,
+        }),
+      });
+      
+      const result = await response.json();
+      
+      if (!response.ok) {
+        setSubmitMessage({ type: "error", text: result.error || "Failed to submit captain" });
+      } else {
+        setSubmitMessage({ type: "success", text: `Captain ${result.captain.playerName} announced for GW${data.deadline.gameweek}` });
+        setSelectedCaptain("");
+        // Refresh dashboard data
+        fetchDashboard();
+      }
+    } catch {
+      setSubmitMessage({ type: "error", text: "Failed to submit captain" });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+  
+  const handleChipSubmit = async () => {
+    if (!selectedChip || !data) return;
+    if (selectedChip === "C" && !selectedChallengedTeam) return;
+    
+    setIsSubmitting(true);
+    setSubmitMessage(null);
+    
+    try {
+      const response = await fetch("/api/team/chips", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chipType: selectedChip,
+          gameweek: data.deadline.gameweek,
+          ...(selectedChip === "C" && { challengedTeamId: selectedChallengedTeam }),
+        }),
+      });
+      
+      const result = await response.json();
+      
+      if (!response.ok) {
+        setSubmitMessage({ type: "error", text: result.error || "Failed to submit chip" });
+      } else {
+        setSubmitMessage({ type: "success", text: result.message });
+        setSelectedChip("");
+        setSelectedChallengedTeam("");
+        // Refresh dashboard data
+        fetchDashboard();
+      }
+    } catch {
+      setSubmitMessage({ type: "error", text: "Failed to submit chip" });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+  
+  const handleCancelChip = async () => {
+    if (!data) return;
+    
+    setIsSubmitting(true);
+    setSubmitMessage(null);
+    
+    try {
+      const response = await fetch("/api/team/chips", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          gameweek: data.deadline.gameweek,
+        }),
+      });
+      
+      const result = await response.json();
+      
+      if (!response.ok) {
+        setSubmitMessage({ type: "error", text: result.error || "Failed to cancel chip" });
+      } else {
+        setSubmitMessage({ type: "success", text: result.message });
+        // Refresh dashboard data
+        fetchDashboard();
+      }
+    } catch {
+      setSubmitMessage({ type: "error", text: "Failed to cancel chip" });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center">
+        <div className="text-white text-xl">Loading dashboard...</div>
+      </div>
+    );
+  }
+
+  if (error || !data) {
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center">
+        <div className="text-red-400 text-xl">{error || "Failed to load dashboard"}</div>
+      </div>
+    );
+  }
+
+  const currentChipSet = data.chipStatus.currentSet === 1 ? data.chipStatus.set1 : data.chipStatus.set2;
+
+  return (
+    <div className="min-h-screen bg-gradient-to-b from-slate-900 via-purple-900 to-slate-900">
+      {/* Navigation */}
+      <nav className="flex items-center justify-between px-6 py-4 lg:px-12 border-b border-white/10">
+        <Link href="/dashboard" className="flex items-center gap-2">
+          <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-yellow-400 to-orange-500 flex items-center justify-center font-bold text-slate-900">
+            TVT
+          </div>
+          <span className="text-xl font-bold text-white">Fantasy Super League</span>
+        </Link>
+        <div className="flex items-center gap-4">
+          <Link href="/dashboard" className="text-yellow-400 font-semibold transition">
+            Dashboard
+          </Link>
+          <Link href="/standings" className="text-gray-300 hover:text-white transition">
+            Standings
+          </Link>
+          <Link href="/fixtures" className="text-gray-300 hover:text-white transition">
+            Fixtures
+          </Link>
+          <Link href="/playoffs" className="text-gray-300 hover:text-white transition">
+            Playoffs
+          </Link>
+          <Link href="/rules" className="text-gray-300 hover:text-white transition">
+            Rules
+          </Link>
+          <button
+            onClick={handleSignOut}
+            className="rounded-full bg-white/10 px-6 py-2 font-semibold text-white hover:bg-white/20 transition"
+          >
+            Sign Out
+          </button>
+        </div>
+      </nav>
+
+      <div className="mx-auto max-w-7xl px-6 py-8">
+        {/* Header */}
+        <div className="mb-8">
+          <div className="flex items-center gap-4 mb-2">
+            <h1 className="text-4xl font-bold text-white">{data.team.name}</h1>
+            <span className="text-lg text-gray-400">({data.team.abbreviation})</span>
+            <ZoneBadge zone={data.leaguePosition.zone} />
+          </div>
+          <p className="text-gray-400">
+            Group {data.team.group} &bull; Rank #{data.leaguePosition.groupRank} &bull; {data.team.leaguePoints} Points
+          </p>
+        </div>
+
+        {/* Main Grid */}
+        <div className="grid gap-6 lg:grid-cols-3">
+          {/* Left Column */}
+          <div className="lg:col-span-2 space-y-6">
+            {/* Deadline + Upcoming Fixture (side by side) */}
+            <div className="grid md:grid-cols-2 gap-6">
+              {/* Deadline Timer */}
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur">
+                <h2 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                  <span className="text-yellow-400">⏱</span> Deadline
+                </h2>
+                <DeadlineTimer deadline={data.deadline.timestamp} gameweek={data.deadline.gameweek} />
+              </div>
+
+              {/* Upcoming Fixture */}
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur">
+                <h2 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                  <span className="text-yellow-400">⚔</span> GW{data.deadline.gameweek} Fixture
+                </h2>
+                {data.upcomingFixture ? (
+                  <div>
+                    <div className="flex items-center justify-center gap-4 mb-3">
+                      <div className="text-center">
+                        <div className="text-xs text-gray-400 mb-1">{data.upcomingFixture.isHome ? "HOME" : "AWAY"}</div>
+                        <div className="text-lg font-bold text-white">{data.team.abbreviation}</div>
+                      </div>
+                      <span className="text-gray-500 font-medium">VS</span>
+                      <div className="text-center">
+                        <div className="text-xs text-gray-400 mb-1">{data.upcomingFixture.isHome ? "AWAY" : "HOME"}</div>
+                        <button
+                          onClick={() => setShowOpponentPlayers(!showOpponentPlayers)}
+                          className="text-lg font-bold text-blue-400 hover:text-blue-300 underline decoration-dotted underline-offset-4 transition"
+                        >
+                          {data.upcomingFixture.opponent.abbreviation}
+                        </button>
+                      </div>
+                    </div>
+                    <div className="text-center text-xs text-gray-500 mb-2">
+                      Click opponent name to {showOpponentPlayers ? "hide" : "view"} players
+                    </div>
+                    {showOpponentPlayers && (
+                      <div className="mt-3 p-3 rounded-lg bg-white/5 border border-white/10">
+                        <div className="text-xs text-gray-400 mb-2 font-semibold">{data.upcomingFixture.opponent.name} — Players</div>
+                        <div className="space-y-2">
+                          {data.upcomingFixture.opponent.players.map((p, i) => (
+                            <div key={i} className="flex items-center justify-between">
+                              <span className="text-white text-sm">{p.name}</span>
+                              <div className="flex gap-2">
+                                <a
+                                  href={p.fplUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-xs px-2 py-1 rounded bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 transition"
+                                >
+                                  GW{data.deadline.gameweek} ↗
+                                </a>
+                                <a
+                                  href={`https://fantasy.premierleague.com/entry/${p.fplId}/event/${data.deadline.gameweek - 1}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-xs px-2 py-1 rounded bg-purple-500/20 text-purple-400 hover:bg-purple-500/30 transition"
+                                >
+                                  GW{data.deadline.gameweek - 1} ↗
+                                </a>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="text-center text-gray-400">No upcoming fixture</div>
+                )}
+              </div>
+            </div>
+
+            {/* Captain & Chip Submission */}
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur">
+              <h2 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                <span className="text-yellow-400">📋</span> GW{data.deadline.gameweek} Submissions
+              </h2>
+              
+              {/* Submit Message */}
+              {submitMessage && (
+                <div className={`mb-4 p-3 rounded-lg ${submitMessage.type === "success" ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"}`}>
+                  {submitMessage.text}
+                </div>
+              )}
+              
+              <div className="grid md:grid-cols-2 gap-6">
+                {/* Captain Submission */}
+                <div className="p-4 rounded-xl bg-white/5">
+                  <h3 className="font-semibold text-white mb-3">Captain</h3>
+                  {!data.announcementSettings.captainAnnouncementEnabled ? (
+                    <div className="flex items-center gap-2 text-red-400 mb-3">
+                      <span className="w-3 h-3 rounded-full bg-red-400"></span>
+                      Captain announcements are currently disabled
+                    </div>
+                  ) : data.upcomingCaptainSubmitted ? (
+                    <div className="flex items-center gap-2 text-green-400 mb-3">
+                      <span className="w-3 h-3 rounded-full bg-green-400"></span>
+                      Submitted
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-2 text-orange-400 mb-3">
+                        <span className="w-3 h-3 rounded-full bg-orange-400"></span>
+                        Not Submitted
+                      </div>
+                      <select
+                        value={selectedCaptain}
+                        onChange={(e) => setSelectedCaptain(e.target.value)}
+                        className="w-full p-2 rounded-lg bg-slate-800 text-white border border-white/30 mb-3 focus:border-yellow-400 focus:outline-none"
+                        disabled={isSubmitting}
+                      >
+                        <option value="">Select captain...</option>
+                        {data.captaincyStatus.player1.chipsRemaining > 0 && (
+                          <option value={data.captaincyStatus.player1.id}>
+                            {data.captaincyStatus.player1.name} ({data.captaincyStatus.player1.chipsRemaining >= 999 ? "unlimited" : `${data.captaincyStatus.player1.chipsRemaining} chips left`})
+                          </option>
+                        )}
+                        {data.captaincyStatus.player2.chipsRemaining > 0 && (
+                          <option value={data.captaincyStatus.player2.id}>
+                            {data.captaincyStatus.player2.name} ({data.captaincyStatus.player2.chipsRemaining >= 999 ? "unlimited" : `${data.captaincyStatus.player2.chipsRemaining} chips left`})
+                          </option>
+                        )}
+                      </select>
+                      <button
+                        onClick={handleCaptainSubmit}
+                        disabled={!selectedCaptain || isSubmitting}
+                        className="w-full py-2 rounded-lg bg-gradient-to-r from-yellow-400 to-orange-500 text-slate-900 font-semibold disabled:opacity-50 disabled:cursor-not-allowed hover:from-yellow-300 hover:to-orange-400 transition"
+                      >
+                        {isSubmitting ? "Submitting..." : "Announce Captain"}
+                      </button>
+                    </>
+                  )}
+                  <div className="mt-3 text-sm text-gray-400">
+                    <div className="flex justify-between">
+                      <span>{data.captaincyStatus.player1.name}</span>
+                      <span>{data.captaincyStatus.player1.chipsRemaining >= 999 ? "unlimited" : `${data.captaincyStatus.player1.chipsRemaining}/15 chips left`}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>{data.captaincyStatus.player2.name}</span>
+                      <span>{data.captaincyStatus.player2.chipsRemaining >= 999 ? "unlimited" : `${data.captaincyStatus.player2.chipsRemaining}/15 chips left`}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* TVT Chips Submission */}
+                <div className="p-4 rounded-xl bg-white/5">
+                  <h3 className="font-semibold text-white mb-3">
+                    TVT Chips (Set {data.chipStatus.currentSet === "playoffs" ? "Playoffs" : data.chipStatus.currentSet})
+                  </h3>
+                  
+                  {!data.announcementSettings.chipAnnouncementEnabled ? (
+                    <div className="flex items-center gap-2 text-red-400 mb-3">
+                      <span className="w-3 h-3 rounded-full bg-red-400"></span>
+                      Chip announcements are currently disabled
+                    </div>
+                  ) : data.upcomingChip ? (
+                    <div className="mb-3">
+                      <div className="flex items-center gap-2 text-green-400 mb-2">
+                        <span className="w-3 h-3 rounded-full bg-green-400"></span>
+                        {data.upcomingChip.chipName} selected
+                      </div>
+                      <button
+                        onClick={handleCancelChip}
+                        disabled={isSubmitting}
+                        className="w-full py-2 rounded-lg bg-red-500/20 text-red-400 font-semibold hover:bg-red-500/30 transition disabled:opacity-50"
+                      >
+                        {isSubmitting ? "Cancelling..." : "Cancel Chip"}
+                      </button>
+                    </div>
+                  ) : data.chipStatus.currentSet !== "playoffs" ? (
+                    <>
+                      <select
+                        value={selectedChip}
+                        onChange={(e) => { setSelectedChip(e.target.value); setSelectedChallengedTeam(""); }}
+                        className="w-full p-2 rounded-lg bg-slate-800 text-white border border-white/30 mb-3 focus:border-purple-400 focus:outline-none"
+                        disabled={isSubmitting}
+                      >
+                        <option value="">Select chip (optional)...</option>
+                        {!currentChipSet.doublePointer.used && (
+                          <option value="D">Double Pointer (DP)</option>
+                        )}
+                        {!currentChipSet.challengeChip.used && (
+                          <option value="C">Challenge Chip (CC)</option>
+                        )}
+                        {!currentChipSet.winWin.used && (
+                          <option value="W">Win-Win (WW)</option>
+                        )}
+                      </select>
+                      {selectedChip === "C" && (
+                        <div className="mb-3">
+                          <label className="block text-xs text-gray-400 mb-1">Challenge against (top 2 from opposite group)</label>
+                          <select
+                            value={selectedChallengedTeam}
+                            onChange={(e) => setSelectedChallengedTeam(e.target.value)}
+                            className="w-full p-2 rounded-lg bg-slate-800 text-white border border-purple-400/50 focus:border-purple-400 focus:outline-none"
+                            disabled={isSubmitting}
+                          >
+                            <option value="">Select opponent...</option>
+                            {(data.oppositeGroupTeams ?? []).map((t) => (
+                              <option key={t.id} value={t.id}>{t.name} ({t.abbreviation})</option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+                      <button
+                        onClick={handleChipSubmit}
+                        disabled={!selectedChip || isSubmitting || (selectedChip === "C" && !selectedChallengedTeam)}
+                        className="w-full py-2 rounded-lg bg-purple-500/20 text-purple-400 font-semibold disabled:opacity-50 disabled:cursor-not-allowed hover:bg-purple-500/30 transition"
+                      >
+                        {isSubmitting ? "Submitting..." : "Use Chip"}
+                      </button>
+                    </>
+                  ) : (
+                    <div className="text-gray-400 text-sm">No chips available in playoffs</div>
+                  )}
+                  
+                  <div className="mt-3 space-y-2">
+                    <ChipBadge used={currentChipSet.doublePointer.used} name="DP" />
+                    <ChipBadge used={currentChipSet.challengeChip.used} name="CC" />
+                    <ChipBadge used={currentChipSet.winWin.used} name="WW" />
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            {/* Last GW Result with navigation */}
+            {data.lastGwResult && (
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur">
+                <div className="flex items-center justify-between mb-4">
+                  <button
+                    onClick={handlePrevGw}
+                    disabled={!data.minCompletedGw || !viewedGw || viewedGw <= data.minCompletedGw}
+                    className="text-3xl px-3 py-1 rounded-full bg-purple-900/60 border border-purple-400 text-yellow-300 shadow-lg hover:bg-yellow-400 hover:text-purple-900 transition disabled:opacity-30 disabled:bg-gray-700 disabled:text-gray-400"
+                    aria-label="Previous GW"
+                  >
+                    &#8592;
+                  </button>
+                  <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                    <span className="text-yellow-400">📊</span> GW{data.lastGwResult.gameweek} Result
+                  </h2>
+                  <button
+                    onClick={handleNextGw}
+                    disabled={!data.maxCompletedGw || !viewedGw || viewedGw >= data.maxCompletedGw}
+                    className="text-3xl px-3 py-1 rounded-full bg-purple-900/60 border border-purple-400 text-yellow-300 shadow-lg hover:bg-yellow-400 hover:text-purple-900 transition disabled:opacity-30 disabled:bg-gray-700 disabled:text-gray-400"
+                    aria-label="Next GW"
+                  >
+                    &#8594;
+                  </button>
+                </div>
+                
+                {/* Score Header */}
+                <div className="flex items-center justify-between mb-6">
+                  <div className="flex-1 text-center">
+                    <div className="text-xs text-gray-400 mb-1">{data.lastGwResult.isHome ? "HOME" : "AWAY"}</div>
+                    <div className="text-lg font-bold text-white">{data.lastGwResult.myTeamName}</div>
+                  </div>
+                  <div className="px-6 text-center">
+                    <div className={`text-4xl font-bold ${
+                      data.lastGwResult.result === "W" ? "text-green-400" :
+                      data.lastGwResult.result === "L" ? "text-red-400" : "text-gray-400"
+                    }`}>
+                      {data.lastGwResult.myScore} - {data.lastGwResult.oppScore}
+                    </div>
+                    <div className="flex items-center justify-center gap-2 mt-2">
+                      <span className={`px-2 py-0.5 rounded text-xs font-semibold ${
+                        data.lastGwResult.result === "W" ? "bg-green-500/20 text-green-400" :
+                        data.lastGwResult.result === "L" ? "bg-red-500/20 text-red-400" : "bg-gray-500/20 text-gray-400"
+                      }`}>
+                        {data.lastGwResult.result === "W" ? "WIN +2" : data.lastGwResult.result === "D" ? "DRAW +1" : "LOSS +0"}
+                      </span>
+                      {data.lastGwResult.gotBonus && (
+                        <span className="px-2 py-0.5 rounded text-xs font-semibold bg-yellow-500/20 text-yellow-400">
+                          BONUS +1
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex-1 text-center">
+                    <div className="text-xs text-gray-400 mb-1">{data.lastGwResult.isHome ? "AWAY" : "HOME"}</div>
+                    <div className="text-lg font-bold text-white">{data.lastGwResult.opponent}</div>
+                  </div>
+                </div>
+                
+                {/* Player Scores */}
+                <div className="grid md:grid-cols-2 gap-4">
+                  {/* My Team Players */}
+                  <div className="p-3 rounded-lg bg-white/5">
+                    <div className="text-xs text-gray-400 mb-2 text-center">
+                      {data.lastGwResult.myTeamAbbr} Players
+                      {!data.lastGwResult.hasMyCaptainData && (
+                        <span className="text-orange-400 ml-1">(estimated)</span>
+                      )}
+                    </div>
+                    {data.lastGwResult.myPlayerScores.map((p, i) => (
+                      <div key={i} className="flex items-center justify-between py-1">
+                        <div className="flex items-center gap-2">
+                          {p.fplUrl ? (
+                            <a
+                              href={p.fplUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-blue-400 hover:text-blue-300 underline"
+                            >
+                              {p.name}
+                            </a>
+                          ) : (
+                            <span className="text-white">{p.name}</span>
+                          )}
+                          {p.isCaptain && (
+                            <span className={`px-1.5 py-0.5 rounded text-xs font-bold ${p.isInferred ? "bg-orange-500/20 text-orange-400" : "bg-yellow-500/20 text-yellow-400"}`}>
+                              C{p.isInferred ? "?" : ""}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-right">
+                          {p.isCaptain ? (
+                            <span className={p.isInferred ? "text-orange-400 font-semibold" : "text-yellow-400 font-semibold"}>
+                              {p.fplScore}{p.transferHits > 0 ? ` - ${p.transferHits}` : ""} × 2 = {p.finalScore}
+                            </span>
+                          ) : (
+                            <span className="text-white">{p.finalScore}</span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  
+                  {/* Opponent Players */}
+                  <div className="p-3 rounded-lg bg-white/5">
+                    <div className="text-xs text-gray-400 mb-2 text-center">
+                      {data.lastGwResult.opponentAbbr} Players
+                      {!data.lastGwResult.hasOppCaptainData && (
+                        <span className="text-orange-400 ml-1">(estimated)</span>
+                      )}
+                    </div>
+                    {data.lastGwResult.oppPlayerScores.map((p, i) => (
+                      <div key={i} className="flex items-center justify-between py-1">
+                        <div className="flex items-center gap-2">
+                          {p.fplUrl ? (
+                            <a
+                              href={p.fplUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-blue-400 hover:text-blue-300 underline"
+                            >
+                              {p.name}
+                            </a>
+                          ) : (
+                            <span className="text-white">{p.name}</span>
+                          )}
+                          {p.isCaptain && (
+                            <span className={`px-1.5 py-0.5 rounded text-xs font-bold ${p.isInferred ? "bg-orange-500/20 text-orange-400" : "bg-yellow-500/20 text-yellow-400"}`}>
+                              C{p.isInferred ? "?" : ""}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-right">
+                          {p.isCaptain ? (
+                            <span className={p.isInferred ? "text-orange-400 font-semibold" : "text-yellow-400 font-semibold"}>
+                              {p.fplScore}{p.transferHits > 0 ? ` - ${p.transferHits}` : ""} × 2 = {p.finalScore}
+                            </span>
+                          ) : (
+                            <span className="text-white">{p.finalScore}</span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Recent Form & Stats */}
+            <div className="grid md:grid-cols-2 gap-6">
+              {/* Recent Form */}
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur">
+                <h2 className="text-lg font-bold text-white mb-4">Recent Form</h2>
+                <div className="flex gap-2 mb-4">
+                  {data.recentForm.map((f, i) => (
+                    <div key={i} className="text-center">
+                      <FormBadge result={f.result} gotBonus={f.gotBonus} />
+                      <div className="text-xs text-gray-500 mt-1">GW{f.gameweek}</div>
+                    </div>
+                  ))}
+                  {data.recentForm.length === 0 && (
+                    <div className="text-gray-400">No matches played yet</div>
+                  )}
+                </div>
+                {data.seasonStats.currentStreak && (
+                  <div className="text-sm text-gray-400">
+                    Current: <span className={
+                      data.seasonStats.currentStreak.type === "W" ? "text-green-400" :
+                      data.seasonStats.currentStreak.type === "L" ? "text-red-400" : "text-gray-400"
+                    }>
+                      {data.seasonStats.currentStreak.count} {data.seasonStats.currentStreak.type === "W" ? "wins" : data.seasonStats.currentStreak.type === "L" ? "losses" : "draws"} in a row
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Season Stats */}
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur">
+                <h2 className="text-lg font-bold text-white mb-4">Season Stats</h2>
+                <div className="grid grid-cols-3 gap-4 text-center mb-4">
+                  <div>
+                    <div className="text-2xl font-bold text-green-400">{data.seasonStats.wins}</div>
+                    <div className="text-xs text-gray-400">Wins</div>
+                  </div>
+                  <div>
+                    <div className="text-2xl font-bold text-gray-400">{data.seasonStats.draws}</div>
+                    <div className="text-xs text-gray-400">Draws</div>
+                  </div>
+                  <div>
+                    <div className="text-2xl font-bold text-red-400">{data.seasonStats.losses}</div>
+                    <div className="text-xs text-gray-400">Losses</div>
+                  </div>
+                </div>
+                <div className="space-y-1 text-sm">
+                  <div className="flex justify-between text-gray-400">
+                    <span>Bonus Points</span>
+                    <span className="text-yellow-400">+{data.seasonStats.bonusPointsEarned}</span>
+                  </div>
+                  <div className="flex justify-between text-gray-400">
+                    <span>Chip Points</span>
+                    <span className="text-purple-400">+{data.seasonStats.chipPointsEarned}</span>
+                  </div>
+                  <div className="flex justify-between text-gray-400">
+                    <span>Points To Top</span>
+                    <span className="text-white">-{data.leaguePosition.pointsToTop}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Team Members */}
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur">
+              <h2 className="text-lg font-bold text-white mb-4">Team Members</h2>
+              <div className="grid md:grid-cols-2 gap-4">
+                {data.teamMembers.map((member, i) => (
+                  <div key={i} className="p-4 rounded-xl bg-white/5">
+                    <div className="font-semibold text-white mb-2">{member.name}</div>
+                    <div className="text-sm text-gray-400 mb-3">
+                      Captaincy chips: {15 - member.captaincyChipsUsed}/15 remaining
+                    </div>
+                    <div className="flex gap-2">
+                      <a
+                        href={member.fplUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex-1 text-center px-3 py-2 rounded-lg bg-blue-500/20 text-blue-400 text-sm hover:bg-blue-500/30 transition"
+                      >
+                        Current GW ↗
+                      </a>
+                      <a
+                        href={member.fplHistoryUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex-1 text-center px-3 py-2 rounded-lg bg-purple-500/20 text-purple-400 text-sm hover:bg-purple-500/30 transition"
+                      >
+                        History ↗
+                      </a>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Right Column */}
+          <div className="space-y-6">
+            {/* Mini Table */}
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur">
+              <h2 className="text-lg font-bold text-white mb-4">Group {data.team.group} Table</h2>
+              <div className="space-y-2">
+                {data.leaguePosition.miniTable.map((t) => (
+                  <div
+                    key={t.rank}
+                    className={`flex items-center justify-between p-3 rounded-lg ${
+                      t.isCurrentTeam ? "bg-yellow-500/20 border border-yellow-500/30" : "bg-white/5"
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className={`w-6 h-6 flex items-center justify-center rounded-full text-xs font-bold ${
+                        t.rank <= 8 ? "bg-green-500/20 text-green-400" :
+                        t.rank <= 14 ? "bg-yellow-500/20 text-yellow-400" : "bg-red-500/20 text-red-400"
+                      }`}>
+                        {t.rank}
+                      </span>
+                      <span className={t.isCurrentTeam ? "text-yellow-400 font-semibold" : "text-white"}>
+                        {t.name}
+                      </span>
+                    </div>
+                    <span className="text-white font-bold">{t.points}</span>
+                  </div>
+                ))}
+              </div>
+              <Link
+                href="/standings"
+                className="block text-center text-sm text-blue-400 hover:text-blue-300 mt-4"
+              >
+                View Full Table →
+              </Link>
+            </div>
+
+            {/* Next 5 Fixtures */}
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur">
+              <h2 className="text-lg font-bold text-white mb-4">Upcoming Fixtures</h2>
+              <div className="space-y-2">
+                {data.upcomingFixtures.map((f, i) => (
+                  <div key={i} className="flex items-center justify-between p-3 rounded-lg bg-white/5">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-500 w-8">GW{f.gameweek}</span>
+                      <span className={`text-xs px-2 py-0.5 rounded ${f.isHome ? "bg-green-500/20 text-green-400" : "bg-blue-500/20 text-blue-400"}`}>
+                        {f.isHome ? "H" : "A"}
+                      </span>
+                    </div>
+                    <span className="text-white">{f.opponent}</span>
+                  </div>
+                ))}
+                {data.upcomingFixtures.length === 0 && (
+                  <div className="text-gray-400 text-center py-4">No upcoming fixtures</div>
+                )}
+              </div>
+            </div>
+
+            {/* Highs & Lows */}
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur">
+              <h2 className="text-lg font-bold text-white mb-4">Highs & Lows</h2>
+              <div className="space-y-4">
+                <div className="flex items-center justify-between p-3 rounded-lg bg-green-500/10">
+                  <div className="text-sm text-gray-400">Highest Score</div>
+                  <div className="text-right">
+                    <div className="text-green-400 font-bold">{data.seasonStats.highestScoringGW.score}</div>
+                    <div className="text-xs text-gray-500">GW{data.seasonStats.highestScoringGW.gameweek}</div>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between p-3 rounded-lg bg-red-500/10">
+                  <div className="text-sm text-gray-400">Lowest Score</div>
+                  <div className="text-right">
+                    <div className="text-red-400 font-bold">{data.seasonStats.lowestScoringGW.score}</div>
+                    <div className="text-xs text-gray-500">GW{data.seasonStats.lowestScoringGW.gameweek}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Recent Captains */}
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur">
+              <h2 className="text-lg font-bold text-white mb-4">Recent Captains</h2>
+              <div className="space-y-2">
+                {data.captaincyStatus.recentCaptains.map((c, i) => (
+                  <div key={i} className="flex items-center justify-between p-3 rounded-lg bg-white/5">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-500 w-8">GW{c.gameweek}</span>
+                      <span className="text-white">{c.playerName}</span>
+                    </div>
+                    <span className="text-yellow-400 font-bold">{c.score}</span>
+                  </div>
+                ))}
+                {data.captaincyStatus.recentCaptains.length === 0 && (
+                  <div className="text-gray-400 text-center py-4">No captain history</div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

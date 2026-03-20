@@ -1,0 +1,392 @@
+import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { relations } from "drizzle-orm";
+
+// ============================================
+// TVT Fantasy Super League Database Schema
+// ============================================
+
+// Admin accounts only
+export const users = sqliteTable("users", {
+  id: text("id").primaryKey(),
+  email: text("email").notNull().unique(),
+  password: text("password").notNull(),
+  name: text("name").notNull(),
+  isAdmin: integer("is_admin", { mode: "boolean" }).notNull().default(false),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+// Group (A or B)
+export const groups = sqliteTable("groups", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull().unique(), // "A" or "B"
+});
+
+// Team (2 players per team) - also acts as login account
+export const teams = sqliteTable("teams", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull().unique(), // Team name used as login ID
+  abbreviation: text("abbreviation").notNull(), // e.g., "DM"
+  password: text("password").notNull(), // Hashed password for team login
+  mustChangePassword: integer("must_change_password", { mode: "boolean" }).notNull().default(true),
+  groupId: text("group_id").notNull().references(() => groups.id),
+  
+  // League points (separate from match scores)
+  leaguePoints: integer("league_points").notNull().default(0),
+  bonusPoints: integer("bonus_points").notNull().default(0),
+  
+  // Chip tracking for Set 1 (GW1-15) and Set 2 (GW16-30)
+  doublePointerSet1Used: integer("double_pointer_set1_used", { mode: "boolean" }).notNull().default(false),
+  challengeChipSet1Used: integer("challenge_chip_set1_used", { mode: "boolean" }).notNull().default(false),
+  winWinSet1Used: integer("win_win_set1_used", { mode: "boolean" }).notNull().default(false),
+  doublePointerSet2Used: integer("double_pointer_set2_used", { mode: "boolean" }).notNull().default(false),
+  challengeChipSet2Used: integer("challenge_chip_set2_used", { mode: "boolean" }).notNull().default(false),
+  winWinSet2Used: integer("win_win_set2_used", { mode: "boolean" }).notNull().default(false),
+  
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+// Player (each team has exactly 2 players)
+export const players = sqliteTable("players", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  fplId: text("fpl_id").notNull(), // Official FPL Team ID for fetching scores
+  teamId: text("team_id").notNull().references(() => teams.id),
+  
+  // Captaincy tracking (15 chips per player in League Stage)
+  captaincyChipsUsed: integer("captaincy_chips_used").notNull().default(0),
+  
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+// Gameweek (GW1 - GW38)
+export const gameweeks = sqliteTable("gameweeks", {
+  id: text("id").primaryKey(),
+  number: integer("number").notNull().unique(), // 1-38
+  deadline: integer("deadline", { mode: "timestamp" }).notNull(),
+  
+  // Phase classification
+  isPlayoffs: integer("is_playoffs", { mode: "boolean" }).notNull().default(false), // GW31-38 are playoffs
+  
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+// Fixture (match between two teams)
+export const fixtures = sqliteTable("fixtures", {
+  id: text("id").primaryKey(),
+  gameweekId: text("gameweek_id").notNull().references(() => gameweeks.id),
+  homeTeamId: text("home_team_id").notNull().references(() => teams.id),
+  awayTeamId: text("away_team_id").notNull().references(() => teams.id),
+  groupId: text("group_id").notNull().references(() => groups.id),
+  
+  // Fixture type
+  isChallenge: integer("is_challenge", { mode: "boolean" }).notNull().default(false), // Challenge Chip fixture
+  isPlayoff: integer("is_playoff", { mode: "boolean" }).notNull().default(false), // Playoff fixture
+  
+  // Playoff-specific fields (null for league-phase fixtures)
+  roundName: text("round_name"), // "RO16", "QF", "SF", "Final", "C-31", etc.
+  leg: integer("leg"), // 1 or 2 for 2-legged ties; null for single-leg
+  tieId: text("tie_id"), // Links to playoffTies.tieId
+  roundType: text("round_type"), // "tvt" | "challenger-ko" | "challenger-survival"
+  
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+// Result of a fixture
+export const results = sqliteTable("results", {
+  id: text("id").primaryKey(),
+  fixtureId: text("fixture_id").notNull().unique().references(() => fixtures.id),
+  teamId: text("team_id").notNull().references(() => teams.id),
+  
+  // Scores (combined FPL scores minus transfer hits)
+  homeScore: integer("home_score").notNull(),
+  awayScore: integer("away_score").notNull(),
+  
+  // Match points awarded (Win=2, Draw=1, Loss=0)
+  homeMatchPoints: integer("home_match_points").notNull(),
+  awayMatchPoints: integer("away_match_points").notNull(),
+  
+  // Bonus tracking
+  homeGotBonus: integer("home_got_bonus", { mode: "boolean" }).notNull().default(false),
+  awayGotBonus: integer("away_got_bonus", { mode: "boolean" }).notNull().default(false),
+  
+  // Chip usage
+  homeUsedDoublePointer: integer("home_used_double_pointer", { mode: "boolean" }).notNull().default(false),
+  awayUsedDoublePointer: integer("away_used_double_pointer", { mode: "boolean" }).notNull().default(false),
+  
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+// Captain selection per gameweek  
+export const gameweekCaptains = sqliteTable("gameweek_captains", {
+  id: text("id").primaryKey(),
+  gameweekId: text("gameweek_id").notNull().references(() => gameweeks.id),
+  playerId: text("player_id").notNull().references(() => players.id),
+  
+  // FPL scores for the captain
+  fplScore: integer("fpl_score").notNull().default(0),
+  transferHits: integer("transfer_hits").notNull().default(0),
+  doubledScore: integer("doubled_score").notNull().default(0), // (fplScore - transferHits) * 2
+  
+  // Announcement tracking
+  announcedAt: integer("announced_at", { mode: "timestamp" }),
+  isValid: integer("is_valid", { mode: "boolean" }).notNull().default(true), // false if announced late or spammed
+  
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+// TVT Chip usage per gameweek
+export const gameweekChips = sqliteTable("gameweek_chips", {
+  id: text("id").primaryKey(),
+  teamId: text("team_id").notNull().references(() => teams.id),
+  gameweekId: text("gameweek_id").notNull().references(() => gameweeks.id),
+  
+  // Chip type: "W" = Win-Win, "D" = Double Pointer, "C" = Challenge
+  chipType: text("chip_type").notNull(), // "W", "D", "C"
+  
+  // For Challenge Chip: the team being challenged (top-2 from opposite group)
+  challengedTeamId: text("challenged_team_id").references(() => teams.id),
+  
+  // Validation status
+  isValid: integer("is_valid", { mode: "boolean" }).notNull().default(true),
+  validationErrors: text("validation_errors"), // JSON array of error messages
+  
+  // Processing status
+  isProcessed: integer("is_processed", { mode: "boolean" }).notNull().default(false),
+  pointsAwarded: integer("points_awarded").notNull().default(0),
+  
+  // For Win-Win: track if team had negative hits (chip wasted)
+  hadNegativeHits: integer("had_negative_hits", { mode: "boolean" }).notNull().default(false),
+  
+  // For Double Pointer: team's rank and opponent's rank at time of validation
+  teamRankAtValidation: integer("team_rank_at_validation"),
+  opponentRankAtValidation: integer("opponent_rank_at_validation"),
+  
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+// ============================================
+// Playoff Tables
+// ============================================
+
+// Playoff ties — one row per matchup (links 2-legged or single-leg encounters)
+export const playoffTies = sqliteTable("playoff_ties", {
+  tieId: text("tie_id").primaryKey(), // e.g. "RO16-A", "C-31-A", "QF-B"
+  roundName: text("round_name").notNull(), // Display label: "RO16", "QF", "SF", "Final", "C-31", etc.
+  roundType: text("round_type").notNull(), // "tvt" | "challenger-ko" | "challenger-survival"
+  homeTeamId: text("home_team_id").references(() => teams.id),
+  awayTeamId: text("away_team_id").references(() => teams.id),
+  homeAggregate: integer("home_aggregate").notNull().default(0),
+  awayAggregate: integer("away_aggregate").notNull().default(0),
+  winnerId: text("winner_id").references(() => teams.id),
+  loserId: text("loser_id").references(() => teams.id),
+  gw1: integer("gw1").notNull(), // First leg / single-leg GW number
+  gw2: integer("gw2"), // Second leg GW number (null for single-leg)
+  status: text("status").notNull().default("pending"), // "pending" | "leg1_done" | "complete"
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+// Challenger Survival entries (GW33) — individual team scores, not head-to-head
+export const challengerSurvivalEntries = sqliteTable("challenger_survival_entries", {
+  id: text("id").primaryKey(),
+  gameweekId: text("gameweek_id").notNull().references(() => gameweeks.id),
+  teamId: text("team_id").notNull().references(() => teams.id),
+  score: integer("score").notNull().default(0),
+  rank: integer("rank"),
+  advanced: integer("advanced", { mode: "boolean" }).notNull().default(false),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+// Admin-configurable settings (key-value store)
+export const settings = sqliteTable("settings", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+// Audit log for penalties and special events
+export const auditLogs = sqliteTable("audit_logs", {
+  id: text("id").primaryKey(),
+  type: text("type").notNull(), // "PENALTY", "BONUS", "CHIP_USAGE", etc.
+  description: text("description").notNull(),
+  teamId: text("team_id"),
+  gameweekId: text("gameweek_id"),
+  pointsAffected: integer("points_affected").notNull().default(0),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+// ============================================
+// Relations
+// ============================================
+
+// Users are now admin-only, no team relation needed
+
+export const groupsRelations = relations(groups, ({ many }) => ({
+  teams: many(teams),
+  fixtures: many(fixtures),
+}));
+
+export const teamsRelations = relations(teams, ({ one, many }) => ({
+  group: one(groups, {
+    fields: [teams.groupId],
+    references: [groups.id],
+  }),
+  players: many(players),
+  homeFixtures: many(fixtures, { relationName: "homeTeam" }),
+  awayFixtures: many(fixtures, { relationName: "awayTeam" }),
+  results: many(results),
+  chips: many(gameweekChips, { relationName: "teamChips" }),
+  challengedChips: many(gameweekChips, { relationName: "challengedTeamChips" }),
+}));
+
+export const playersRelations = relations(players, ({ one, many }) => ({
+  team: one(teams, {
+    fields: [players.teamId],
+    references: [teams.id],
+  }),
+  captainedIn: many(gameweekCaptains),
+}));
+
+export const gameweeksRelations = relations(gameweeks, ({ many }) => ({
+  fixtures: many(fixtures),
+  captains: many(gameweekCaptains),
+  chips: many(gameweekChips),
+}));
+
+export const fixturesRelations = relations(fixtures, ({ one }) => ({
+  gameweek: one(gameweeks, {
+    fields: [fixtures.gameweekId],
+    references: [gameweeks.id],
+  }),
+  homeTeam: one(teams, {
+    fields: [fixtures.homeTeamId],
+    references: [teams.id],
+    relationName: "homeTeam",
+  }),
+  awayTeam: one(teams, {
+    fields: [fixtures.awayTeamId],
+    references: [teams.id],
+    relationName: "awayTeam",
+  }),
+  group: one(groups, {
+    fields: [fixtures.groupId],
+    references: [groups.id],
+  }),
+  result: one(results),
+}));
+
+export const resultsRelations = relations(results, ({ one }) => ({
+  fixture: one(fixtures, {
+    fields: [results.fixtureId],
+    references: [fixtures.id],
+  }),
+  team: one(teams, {
+    fields: [results.teamId],
+    references: [teams.id],
+  }),
+}));
+
+export const gameweekCaptainsRelations = relations(gameweekCaptains, ({ one }) => ({
+  gameweek: one(gameweeks, {
+    fields: [gameweekCaptains.gameweekId],
+    references: [gameweeks.id],
+  }),
+  player: one(players, {
+    fields: [gameweekCaptains.playerId],
+    references: [players.id],
+  }),
+}));
+
+export const playoffTiesRelations = relations(playoffTies, ({ one }) => ({
+  homeTeam: one(teams, {
+    fields: [playoffTies.homeTeamId],
+    references: [teams.id],
+    relationName: "homeTie",
+  }),
+  awayTeam: one(teams, {
+    fields: [playoffTies.awayTeamId],
+    references: [teams.id],
+    relationName: "awayTie",
+  }),
+  winner: one(teams, {
+    fields: [playoffTies.winnerId],
+    references: [teams.id],
+    relationName: "wonTie",
+  }),
+  loser: one(teams, {
+    fields: [playoffTies.loserId],
+    references: [teams.id],
+    relationName: "lostTie",
+  }),
+}));
+
+export const challengerSurvivalRelations = relations(challengerSurvivalEntries, ({ one }) => ({
+  gameweek: one(gameweeks, {
+    fields: [challengerSurvivalEntries.gameweekId],
+    references: [gameweeks.id],
+  }),
+  team: one(teams, {
+    fields: [challengerSurvivalEntries.teamId],
+    references: [teams.id],
+  }),
+}));
+
+export const gameweekChipsRelations = relations(gameweekChips, ({ one }) => ({
+  team: one(teams, {
+    fields: [gameweekChips.teamId],
+    references: [teams.id],
+    relationName: "teamChips",
+  }),
+  gameweek: one(gameweeks, {
+    fields: [gameweekChips.gameweekId],
+    references: [gameweeks.id],
+  }),
+  challengedTeam: one(teams, {
+    fields: [gameweekChips.challengedTeamId],
+    references: [teams.id],
+    relationName: "challengedTeamChips",
+  }),
+}));
+
+// ============================================
+// Type Exports (use these instead of Prisma types)
+// ============================================
+
+export type User = typeof users.$inferSelect;
+export type NewUser = typeof users.$inferInsert;
+
+export type Group = typeof groups.$inferSelect;
+export type NewGroup = typeof groups.$inferInsert;
+
+export type Team = typeof teams.$inferSelect;
+export type NewTeam = typeof teams.$inferInsert;
+
+export type Player = typeof players.$inferSelect;
+export type NewPlayer = typeof players.$inferInsert;
+
+export type Gameweek = typeof gameweeks.$inferSelect;
+export type NewGameweek = typeof gameweeks.$inferInsert;
+
+export type Fixture = typeof fixtures.$inferSelect;
+export type NewFixture = typeof fixtures.$inferInsert;
+
+export type Result = typeof results.$inferSelect;
+export type NewResult = typeof results.$inferInsert;
+
+export type GameweekCaptain = typeof gameweekCaptains.$inferSelect;
+export type NewGameweekCaptain = typeof gameweekCaptains.$inferInsert;
+
+export type GameweekChip = typeof gameweekChips.$inferSelect;
+export type NewGameweekChip = typeof gameweekChips.$inferInsert;
+
+export type AuditLog = typeof auditLogs.$inferSelect;
+export type NewAuditLog = typeof auditLogs.$inferInsert;
+
+export type Setting = typeof settings.$inferSelect;
