@@ -1088,14 +1088,14 @@ export default function AdminDashboard() {
       )}
 
       {/* Navigation */}
-      <nav className="flex items-center justify-between px-6 py-4 lg:px-12 border-b border-white/10">
+      <nav className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 sm:px-6 sm:py-4 lg:px-12 border-b border-white/10">
         <Link href="/admin" className="flex items-center gap-2">
-          <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-yellow-400 to-orange-500 flex items-center justify-center font-bold text-slate-900">
+          <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-yellow-400 to-orange-500 flex items-center justify-center font-bold text-slate-900 shrink-0">
             TVT
           </div>
-          <span className="text-xl font-bold text-white">Admin Dashboard</span>
+          <span className="text-xl font-bold text-white hidden sm:inline">Admin Dashboard</span>
         </Link>
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-4 text-sm sm:text-base">
           <Link href="/admin" className="text-yellow-400 font-semibold transition">
             Home
           </Link>
