@@ -129,7 +129,8 @@ function StandingsTable({ teams, group }: { teams: TeamStanding[]; group: string
         <div className="bg-gradient-to-r from-purple-600/20 to-orange-500/20 px-4 py-3 border-b border-white/10">
           <h2 className="text-lg font-bold text-white">Group {group}</h2>
         </div>
-        <table className="w-full text-sm">
+        <div className="overflow-x-auto">
+        <table className="w-full text-sm min-w-[500px]">
           <thead>
             <tr className="border-b border-white/10 text-xs text-gray-400">
               <th className="px-3 py-2 text-left font-medium w-10">Rank</th>
@@ -196,6 +197,7 @@ function StandingsTable({ teams, group }: { teams: TeamStanding[]; group: string
             )}
           </tbody>
         </table>
+        </div>
       </div>
     </>
   );
@@ -273,14 +275,14 @@ export default function StandingsPage() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-900 via-purple-900 to-slate-900">
       {/* Navigation */}
-      <nav className="flex items-center justify-between px-6 py-4 lg:px-12 border-b border-white/10">
+      <nav className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 sm:px-6 sm:py-4 lg:px-12 border-b border-white/10">
         <Link href={isAdmin ? "/admin" : isLoggedIn ? "/dashboard" : "/"} className="flex items-center gap-2">
-          <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-yellow-400 to-orange-500 flex items-center justify-center font-bold text-slate-900">
+          <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-yellow-400 to-orange-500 flex items-center justify-center font-bold text-slate-900 shrink-0">
             TVT
           </div>
-          <span className="text-xl font-bold text-white">Fantasy Super League</span>
+          <span className="text-xl font-bold text-white hidden sm:inline">Fantasy Super League</span>
         </Link>
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-4 text-sm sm:text-base">
           {isAdmin ? (
             <Link href="/admin" className="text-gray-300 hover:text-white transition">Home</Link>
           ) : isLoggedIn ? (
@@ -318,9 +320,9 @@ export default function StandingsPage() {
         </div>
       </nav>
 
-      <div className="mx-auto max-w-7xl px-6 py-12">
+      <div className="mx-auto max-w-7xl px-4 sm:px-6 py-8 sm:py-12">
         <div className="text-center mb-12">
-          <h1 className="text-4xl font-bold text-white mb-4">League Standings</h1>
+          <h1 className="text-2xl sm:text-4xl font-bold text-white mb-4">League Standings</h1>
           <p className="text-gray-400">
             {latestGameweek > 0 
               ? `After Gameweek ${latestGameweek} • League Stage`

@@ -41,14 +41,14 @@ export default function Home() {
       {/* Hero Section */}
       <header className="relative overflow-hidden">
         <div className="absolute inset-0 bg-[url('/grid.svg')] bg-center [mask-image:linear-gradient(180deg,white,rgba(255,255,255,0))]"></div>
-        <nav className="relative z-10 flex items-center justify-between px-6 py-4 lg:px-12">
+        <nav className="relative z-10 flex flex-wrap items-center justify-between gap-2 px-4 py-3 sm:px-6 sm:py-4 lg:px-12">
           <div className="flex items-center gap-2">
-            <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-yellow-400 to-orange-500 flex items-center justify-center font-bold text-slate-900">
+            <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-yellow-400 to-orange-500 flex items-center justify-center font-bold text-slate-900 shrink-0">
               TVT
             </div>
-            <span className="text-xl font-bold text-white">Fantasy Super League</span>
+            <span className="text-xl font-bold text-white hidden sm:inline">Fantasy Super League</span>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-4 text-sm sm:text-base">
             {isLoggedIn && (
               <Link href="/dashboard" className="text-yellow-400 font-semibold hover:text-yellow-300 transition">
                 Dashboard
@@ -185,9 +185,9 @@ export default function Home() {
       {/* CTA Section */}
       <section className="relative z-10 mx-auto max-w-7xl px-6 py-24">
         <div className="rounded-3xl bg-gradient-to-r from-purple-600 to-orange-500 p-12 text-center">
-          <h2 className="text-3xl font-bold text-white mb-4">Ready to Join the Battle?</h2>
+          <h2 className="text-3xl font-bold text-white mb-4">Get Started</h2>
           <p className="text-white/80 max-w-xl mx-auto">
-            Register your team now and compete against the best. All you need is your FPL Team ID.
+            Please contact the TVT administrators to receive your login credentials. Upon your first sign-in, you will be prompted to update your password for security purposes.
           </p>
         </div>
       </section>

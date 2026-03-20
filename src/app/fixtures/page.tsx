@@ -190,14 +190,14 @@ export default function FixturesPage() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-900 via-purple-900 to-slate-900">
       {/* Navigation */}
-      <nav className="flex items-center justify-between px-6 py-4 lg:px-12 border-b border-white/10">
+      <nav className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 sm:px-6 sm:py-4 lg:px-12 border-b border-white/10">
         <Link href={isAdmin ? "/admin" : isLoggedIn ? "/dashboard" : "/"} className="flex items-center gap-2">
-          <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-yellow-400 to-orange-500 flex items-center justify-center font-bold text-slate-900">
+          <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-yellow-400 to-orange-500 flex items-center justify-center font-bold text-slate-900 shrink-0">
             TVT
           </div>
-          <span className="text-xl font-bold text-white">Fantasy Super League</span>
+          <span className="text-xl font-bold text-white hidden sm:inline">Fantasy Super League</span>
         </Link>
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-4 text-sm sm:text-base">
           {isAdmin ? (
             <Link href="/admin" className="text-gray-300 hover:text-white transition">Home</Link>
           ) : isLoggedIn ? (
@@ -235,7 +235,7 @@ export default function FixturesPage() {
         </div>
       </nav>
 
-      <div className="mx-auto max-w-6xl px-6 py-12">
+      <div className="mx-auto max-w-6xl px-4 sm:px-6 py-8 sm:py-12">
         <div className="text-center mb-8">
           <h1 className="text-4xl font-bold text-white mb-4">Fixtures & Results</h1>
           <p className="text-gray-400">View upcoming matches and past results</p>

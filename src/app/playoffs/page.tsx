@@ -150,6 +150,7 @@ function SurvivalTable({ entries }: { entries: SurvivalDisplay[] }) {
         C-33 Survival (GW33) — Top 8 Advance
       </h3>
       <div className="bg-slate-800/80 border border-white/10 rounded-lg overflow-hidden">
+        <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="text-gray-400 text-xs border-b border-white/10">
@@ -178,6 +179,7 @@ function SurvivalTable({ entries }: { entries: SurvivalDisplay[] }) {
             ))}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   );
@@ -244,14 +246,14 @@ export default function PlayoffsPage() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-900 via-purple-900 to-slate-900">
       {/* Navigation */}
-      <nav className="flex items-center justify-between px-6 py-4 lg:px-12 border-b border-white/10">
+      <nav className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 sm:px-6 sm:py-4 lg:px-12 border-b border-white/10">
         <Link href={isAdmin ? "/admin" : isLoggedIn ? "/dashboard" : "/"} className="flex items-center gap-2">
-          <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-yellow-400 to-orange-500 flex items-center justify-center font-bold text-slate-900">
+          <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-yellow-400 to-orange-500 flex items-center justify-center font-bold text-slate-900 shrink-0">
             TVT
           </div>
-          <span className="text-xl font-bold text-white">Fantasy Super League</span>
+          <span className="text-xl font-bold text-white hidden sm:inline">Fantasy Super League</span>
         </Link>
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-4 text-sm sm:text-base">
           {isAdmin ? (
             <Link href="/admin" className="text-gray-300 hover:text-white transition">Home</Link>
           ) : isLoggedIn ? (
