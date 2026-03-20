@@ -317,11 +317,13 @@ export default function PlayoffsPage() {
 
         {/* TVT Main Draw Bracket */}
         {activeTab === "tvt" && (
-          <div className="grid grid-cols-4 gap-4 min-h-[600px]">
-            <RoundColumn title="Round of 16" ties={data.tvt.ro16} />
-            <RoundColumn title="Quarter-Finals" ties={data.tvt.qf} />
-            <RoundColumn title="Semi-Finals" ties={data.tvt.sf} />
-            <RoundColumn title="Grand Finale" ties={data.tvt.final} />
+          <div className="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
+            <div className="grid grid-cols-4 gap-3 sm:gap-4 min-w-[700px] min-h-[600px]">
+              <RoundColumn title="Round of 16" ties={data.tvt.ro16} />
+              <RoundColumn title="Quarter-Finals" ties={data.tvt.qf} />
+              <RoundColumn title="Semi-Finals" ties={data.tvt.sf} />
+              <RoundColumn title="Grand Finale" ties={data.tvt.final} />
+            </div>
           </div>
         )}
 
