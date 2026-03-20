@@ -109,6 +109,26 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
+  // Cron job auth — Vercel sends Authorization: Bearer <CRON_SECRET>
+  const cronSecret = process.env.CRON_SECRET;
+  if (cronSecret) {
+    const authHeader = request.headers.get("Authorization");
+    if (authHeader === `Bearer ${cronSecret}`) {
+      if (pathname.startsWith("/api/cron/") || isAdminRoute(pathname, method)) {
+        const response = NextResponse.next();
+        response.headers.set("x-session-id", "cron");
+        response.headers.set("x-session-type", "admin");
+        return response;
+      }
+    }
+    // Cron routes require valid secret — reject if missing/wrong
+    if (pathname.startsWith("/api/cron/")) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+  } else if (pathname.startsWith("/api/cron/")) {
+    return NextResponse.json({ error: "CRON_SECRET not configured" }, { status: 500 });
+  }
+
   // All other API routes require a valid session
   const sessionCookie = request.cookies.get(SESSION_COOKIE_NAME)?.value;
   if (!sessionCookie) {
