@@ -178,6 +178,7 @@ async function fetchAndCacheLiveScores(gameweek: number): Promise<void> {
 
         gwLiveScores.push({
           fixtureId: fixture.id,
+          gameweek: gameweek,  // Track which GW this score is from
           homeTeamName: fixture.homeTeam.name,
           awayTeamName: fixture.awayTeam.name,
           homeTeamAbbr: fixture.homeTeam.abbreviation,

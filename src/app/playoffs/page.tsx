@@ -5,6 +5,7 @@ import Link from "next/link";
 
 interface LiveFixtureScore {
   fixtureId: string;
+  gameweek: number;          // Track which GW this score is from (to distinguish leg1 from leg2)
   homeTeamName: string;
   awayTeamName: string;
   homeTeamAbbr: string;
@@ -73,19 +74,28 @@ function MatchCard({ tie, compact, liveScores }: { tie: TieDisplay; compact?: bo
   const is2Leg = tie.gw2 !== null;
   const isPlaceholder = (side: TeamSide | null) => !side?.teamId;
 
-  // Find live score data matching this tie
-  const liveMatch = liveScores?.find((l) => {
-    if (!tie.home?.abbr || !tie.away?.abbr) return false;
-    return (
-      (l.homeTeamAbbr === tie.home.abbr && l.awayTeamAbbr === tie.away.abbr) ||
-      (l.homeTeamAbbr === tie.away.abbr && l.awayTeamAbbr === tie.home.abbr)
-    );
-  });
+  // NEW: Get live score for a specific gameweek (leg) to distinguish leg1 from leg2
+  const getLiveScoreForGW = (gwNumber: number): LiveFixtureScore | undefined => {
+    if (!liveScores || !tie.home?.abbr || !tie.away?.abbr) return undefined;
+    return liveScores.find((l) => {
+      const homeAbbr = tie.home!.abbr;
+      const awayAbbr = tie.away!.abbr;
+      return (
+        l.gameweek === gwNumber &&
+        ((l.homeTeamAbbr === homeAbbr && l.awayTeamAbbr === awayAbbr) ||
+         (l.homeTeamAbbr === awayAbbr && l.awayTeamAbbr === homeAbbr))
+      );
+    });
+  };
 
-  // For single-leg ties with no score yet, show live score
-  const showLive = !!liveMatch && !is2Leg && tie.home?.leg1Score === null;
-  // For 2-leg ties where leg2 hasn't been scored yet
-  const showLiveLeg2 = !!liveMatch && is2Leg && tie.home?.leg2Score === null && tie.home?.leg1Score !== null;
+  // Get live scores for leg1 and leg2 (if 2-leg tie)
+  const liveScoreLeg1 = getLiveScoreForGW(tie.gw1);
+  const liveScoreLeg2 = is2Leg ? getLiveScoreForGW(tie.gw2!) : undefined;
+
+  // Show live if fresh data exists (overrides stale DB data)
+  const showLiveLeg1 = !!liveScoreLeg1;  // Fresh GW1 data exists
+  const showLiveLeg2 = !!liveScoreLeg2;  // Fresh GW2 data exists
+  const showLive = showLiveLeg1 || showLiveLeg2;  // Any leg is live
 
   const teamLabel = (side: TeamSide | null) => {
     if (!side) return "TBD";
@@ -98,11 +108,11 @@ function MatchCard({ tie, compact, liveScores }: { tie: TieDisplay; compact?: bo
     return "text-white";
   };
 
-  // Helper to get live score for a side
-  const getLiveScore = (side: TeamSide | null): number | null => {
-    if (!liveMatch || !side?.abbr) return null;
-    if (liveMatch.homeTeamAbbr === side.abbr) return liveMatch.homeScore;
-    if (liveMatch.awayTeamAbbr === side.abbr) return liveMatch.awayScore;
+  // Helper to extract score for a specific team from live fixture data
+  const getLiveScore = (side: TeamSide | null, liveFixture: LiveFixtureScore | undefined): number | null => {
+    if (!liveFixture || !side?.abbr) return null;
+    if (liveFixture.homeTeamAbbr === side.abbr) return liveFixture.homeScore;
+    if (liveFixture.awayTeamAbbr === side.abbr) return liveFixture.awayScore;
     return null;
   };
 
@@ -126,19 +136,26 @@ function MatchCard({ tie, compact, liveScores }: { tie: TieDisplay; compact?: bo
         {!isPlaceholder(tie.home) && (
           is2Leg ? (
             <div className="flex gap-2 text-xs tabular-nums">
-              <span className="w-5 text-center">{tie.home?.leg1Score ?? "–"}</span>
-              <span className={`w-5 text-center ${showLiveLeg2 ? "text-green-400" : ""}`}>
-                {showLiveLeg2 ? getLiveScore(tie.home) ?? "–" : (tie.home?.leg2Score ?? "–")}
+              {/* LEG 1: Show fresh live score if available, else DB value */}
+              <span className={`w-5 text-center ${showLiveLeg1 ? "text-green-400" : ""}`}>
+                {showLiveLeg1 ? getLiveScore(tie.home, liveScoreLeg1) ?? "–" : (tie.home?.leg1Score ?? "–")}
               </span>
+              {/* LEG 2: Show fresh live score if available, else DB value */}
+              <span className={`w-5 text-center ${showLiveLeg2 ? "text-green-400" : ""}`}>
+                {showLiveLeg2 ? getLiveScore(tie.home, liveScoreLeg2) ?? "–" : (tie.home?.leg2Score ?? "–")}
+              </span>
+              {/* AGGREGATE: Recalculate using live values when available */}
               <span className="w-6 text-center font-bold border-l border-white/20 pl-1">
-                {showLiveLeg2
-                  ? ((tie.home?.leg1Score ?? 0) + (getLiveScore(tie.home) ?? 0))
-                  : (tie.home?.aggregate ?? "–")}
+                {(() => {
+                  const leg1Val = showLiveLeg1 ? (getLiveScore(tie.home, liveScoreLeg1) ?? 0) : (tie.home?.leg1Score ?? 0);
+                  const leg2Val = showLiveLeg2 ? (getLiveScore(tie.home, liveScoreLeg2) ?? 0) : (tie.home?.leg2Score ?? 0);
+                  return leg1Val + leg2Val;
+                })()}
               </span>
             </div>
           ) : (
             <span className={`text-xs tabular-nums w-5 text-center ${showLive ? "text-green-400" : ""}`}>
-              {showLive ? getLiveScore(tie.home) ?? "–" : (tie.home?.leg1Score ?? "–")}
+              {showLive ? getLiveScore(tie.home, liveScoreLeg1) ?? "–" : (tie.home?.leg1Score ?? "–")}
             </span>
           )
         )}
@@ -150,19 +167,26 @@ function MatchCard({ tie, compact, liveScores }: { tie: TieDisplay; compact?: bo
         {!isPlaceholder(tie.away) && (
           is2Leg ? (
             <div className="flex gap-2 text-xs tabular-nums">
-              <span className="w-5 text-center">{tie.away?.leg1Score ?? "–"}</span>
-              <span className={`w-5 text-center ${showLiveLeg2 ? "text-green-400" : ""}`}>
-                {showLiveLeg2 ? getLiveScore(tie.away) ?? "–" : (tie.away?.leg2Score ?? "–")}
+              {/* LEG 1: Show fresh live score if available, else DB value */}
+              <span className={`w-5 text-center ${showLiveLeg1 ? "text-green-400" : ""}`}>
+                {showLiveLeg1 ? getLiveScore(tie.away, liveScoreLeg1) ?? "–" : (tie.away?.leg1Score ?? "–")}
               </span>
+              {/* LEG 2: Show fresh live score if available, else DB value */}
+              <span className={`w-5 text-center ${showLiveLeg2 ? "text-green-400" : ""}`}>
+                {showLiveLeg2 ? getLiveScore(tie.away, liveScoreLeg2) ?? "–" : (tie.away?.leg2Score ?? "–")}
+              </span>
+              {/* AGGREGATE: Recalculate using live values when available */}
               <span className="w-6 text-center font-bold border-l border-white/20 pl-1">
-                {showLiveLeg2
-                  ? ((tie.away?.leg1Score ?? 0) + (getLiveScore(tie.away) ?? 0))
-                  : (tie.away?.aggregate ?? "–")}
+                {(() => {
+                  const leg1Val = showLiveLeg1 ? (getLiveScore(tie.away, liveScoreLeg1) ?? 0) : (tie.away?.leg1Score ?? 0);
+                  const leg2Val = showLiveLeg2 ? (getLiveScore(tie.away, liveScoreLeg2) ?? 0) : (tie.away?.leg2Score ?? 0);
+                  return leg1Val + leg2Val;
+                })()}
               </span>
             </div>
           ) : (
             <span className={`text-xs tabular-nums w-5 text-center ${showLive ? "text-green-400" : ""}`}>
-              {showLive ? getLiveScore(tie.away) ?? "–" : (tie.away?.leg1Score ?? "–")}
+              {showLive ? getLiveScore(tie.away, liveScoreLeg1) ?? "–" : (tie.away?.leg1Score ?? "–")}
             </span>
           )
         )}
