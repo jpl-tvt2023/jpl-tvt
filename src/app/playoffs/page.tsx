@@ -244,9 +244,10 @@ export default function PlayoffsPage() {
   const [liveScores, setLiveScores] = useState<LiveFixtureScore[]>([]);
 
   const fetchLiveScores = useCallback(async (latestGw: number) => {
-    // Try fetching live scores for GWs around the latest completed
+    // Try fetching live scores for the current GW and next (in case we're between legs)
+    // latestGw is the latest GW with any result, may be partially complete
     // Playoff GWs are 31-38
-    for (let gw = latestGw + 1; gw <= Math.min(latestGw + 2, 38); gw++) {
+    for (let gw = latestGw; gw <= Math.min(latestGw + 1, 38); gw++) {
       if (gw < 31) continue;
       try {
         const res = await fetch(`/api/fixtures/live?gameweek=${gw}`);
@@ -294,15 +295,24 @@ export default function PlayoffsPage() {
 
     fetchData();
     checkAuth();
-
-    // Poll live scores every 10 minutes
-    const interval = setInterval(() => {
-      if (data?.latestCompletedGw && data.latestCompletedGw >= 30) {
-        fetchLiveScores(data.latestCompletedGw);
-      }
-    }, 10 * 60 * 1000);
-    return () => clearInterval(interval);
   }, []);
+
+  // Separate effect for polling live scores every 10 minutes
+  useEffect(() => {
+    if (!data?.latestCompletedGw || data.latestCompletedGw < 30) {
+      return;
+    }
+
+    // Fetch immediately on data change
+    fetchLiveScores(data.latestCompletedGw);
+
+    // Then set up polling
+    const interval = setInterval(() => {
+      fetchLiveScores(data.latestCompletedGw);
+    }, 10 * 60 * 1000);
+
+    return () => clearInterval(interval);
+  }, [data?.latestCompletedGw, fetchLiveScores]);
 
   const handleSignOut = async () => {
     await fetch("/api/auth/signout", { method: "POST" });
