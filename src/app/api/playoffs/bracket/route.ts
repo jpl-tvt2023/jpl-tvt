@@ -215,6 +215,7 @@ async function getFinishedGwScoresFromDb(gameweek: number): Promise<any[]> {
       if (result && result.fixture) {
         gwLiveScores.push({
           fixtureId: fixture.id,
+          gameweek: gameweek,  // Track which GW this score is from
           homeTeamName: result.fixture.homeTeam.name,
           awayTeamName: result.fixture.awayTeam.name,
           homeTeamAbbr: result.fixture.homeTeam.abbreviation,
@@ -287,6 +288,7 @@ async function fetchAndCacheLiveScoresForGw(gameweek: number): Promise<void> {
 
         gwLiveScores.push({
           fixtureId: fixture.id,
+          gameweek: gameweek,  // Track which GW this score is from
           homeTeamName: fixture.homeTeam.name,
           awayTeamName: fixture.awayTeam.name,
           homeTeamAbbr: fixture.homeTeam.abbreviation,
