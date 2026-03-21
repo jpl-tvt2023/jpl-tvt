@@ -130,9 +130,14 @@ export default function AdminDashboard() {
   });
   const [captainLoading, setCaptainLoading] = useState(false);
 
+  // Captain Filter State
+  const [captainFilterGw, setCaptainFilterGw] = useState<string>("");
+  const [captainFilterTeam, setCaptainFilterTeam] = useState<string>("");
+
   // Chips Override State
   const [chipTeams, setChipTeams] = useState<ChipTeam[]>([]);
   const [chipsLoading, setChipsLoading] = useState(false);
+  const [chipFilterTeam, setChipFilterTeam] = useState<string>("");
   const [chipOverride, setChipOverride] = useState({
     teamId: "",
     chipType: "",
@@ -236,9 +241,17 @@ export default function AdminDashboard() {
       const response = await fetch("/api/admin/override-captain");
       if (response.ok) {
         const data = await response.json();
-        setCaptainTeams(data.teams || []);
-        setGameweeks(data.gameweeks || []);
+        // Sort teams alphabetically
+        const sortedTeams = (data.teams || []).sort((a: TeamWithPlayers, b: TeamWithPlayers) => a.name.localeCompare(b.name));
+        setCaptainTeams(sortedTeams);
+        const gws = data.gameweeks || [];
+        setGameweeks(gws);
         setCurrentCaptains(data.currentCaptains || []);
+        // Default GW filter to the latest gameweek
+        if (gws.length > 0 && !captainFilterGw) {
+          const maxGw = Math.max(...gws.map((g: Gameweek) => g.number));
+          setCaptainFilterGw(String(maxGw));
+        }
       }
     } catch (error) {
       console.error("Failed to fetch captain data:", error);
@@ -1117,12 +1130,13 @@ export default function AdminDashboard() {
         </div>
       </nav>
 
-      <div className="mx-auto max-w-7xl px-6 py-8">
+      <div className="mx-auto max-w-7xl px-4 sm:px-6 py-6 sm:py-8">
         {/* Tabs */}
-        <div className="flex gap-4 mb-8 border-b border-white/10 pb-4">
+        <div className="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0 mb-8 border-b border-white/10 pb-4">
+          <div className="flex gap-2 sm:gap-4 min-w-max">
           <button
             onClick={() => { setActiveTab("teams"); setMessage(null); }}
-            className={`px-4 py-2 rounded-lg font-semibold transition ${
+            className={`px-3 sm:px-4 py-2 rounded-lg font-semibold text-sm sm:text-base whitespace-nowrap transition ${
               activeTab === "teams"
                 ? "bg-yellow-500 text-slate-900"
                 : "bg-white/5 text-gray-300 hover:bg-white/10"
@@ -1132,7 +1146,7 @@ export default function AdminDashboard() {
           </button>
           <button
             onClick={() => { setActiveTab("captain"); setMessage(null); }}
-            className={`px-4 py-2 rounded-lg font-semibold transition ${
+            className={`px-3 sm:px-4 py-2 rounded-lg font-semibold text-sm sm:text-base whitespace-nowrap transition ${
               activeTab === "captain"
                 ? "bg-yellow-500 text-slate-900"
                 : "bg-white/5 text-gray-300 hover:bg-white/10"
@@ -1142,7 +1156,7 @@ export default function AdminDashboard() {
           </button>
           <button
             onClick={() => { setActiveTab("chips"); setMessage(null); }}
-            className={`px-4 py-2 rounded-lg font-semibold transition ${
+            className={`px-3 sm:px-4 py-2 rounded-lg font-semibold text-sm sm:text-base whitespace-nowrap transition ${
               activeTab === "chips"
                 ? "bg-yellow-500 text-slate-900"
                 : "bg-white/5 text-gray-300 hover:bg-white/10"
@@ -1152,7 +1166,7 @@ export default function AdminDashboard() {
           </button>
           <button
             onClick={() => { setActiveTab("bulkUpload"); setMessage(null); }}
-            className={`px-4 py-2 rounded-lg font-semibold transition ${
+            className={`px-3 sm:px-4 py-2 rounded-lg font-semibold text-sm sm:text-base whitespace-nowrap transition ${
               activeTab === "bulkUpload"
                 ? "bg-yellow-500 text-slate-900"
                 : "bg-white/5 text-gray-300 hover:bg-white/10"
@@ -1162,7 +1176,7 @@ export default function AdminDashboard() {
           </button>
           <button
             onClick={() => { setActiveTab("scoring"); setMessage(null); setScoringResults([]); }}
-            className={`px-4 py-2 rounded-lg font-semibold transition ${
+            className={`px-3 sm:px-4 py-2 rounded-lg font-semibold text-sm sm:text-base whitespace-nowrap transition ${
               activeTab === "scoring"
                 ? "bg-yellow-500 text-slate-900"
                 : "bg-white/5 text-gray-300 hover:bg-white/10"
@@ -1172,7 +1186,7 @@ export default function AdminDashboard() {
           </button>
           <button
             onClick={() => { setActiveTab("playoffs"); setMessage(null); }}
-            className={`px-4 py-2 rounded-lg font-semibold transition ${
+            className={`px-3 sm:px-4 py-2 rounded-lg font-semibold text-sm sm:text-base whitespace-nowrap transition ${
               activeTab === "playoffs"
                 ? "bg-yellow-500 text-slate-900"
                 : "bg-white/5 text-gray-300 hover:bg-white/10"
@@ -1182,7 +1196,7 @@ export default function AdminDashboard() {
           </button>
           <button
             onClick={() => { setActiveTab("settings"); setMessage(null); }}
-            className={`px-4 py-2 rounded-lg font-semibold transition ${
+            className={`px-3 sm:px-4 py-2 rounded-lg font-semibold text-sm sm:text-base whitespace-nowrap transition ${
               activeTab === "settings"
                 ? "bg-yellow-500 text-slate-900"
                 : "bg-white/5 text-gray-300 hover:bg-white/10"
@@ -1190,6 +1204,7 @@ export default function AdminDashboard() {
           >
             Settings
           </button>
+          </div>
         </div>
 
         {/* Global Message */}
@@ -1543,7 +1558,7 @@ export default function AdminDashboard() {
                             .find((t) => t.id === captainOverride.teamId)
                             ?.players.map((player) => (
                               <option key={player.id} value={player.id} className="bg-slate-800">
-                                {player.name} (Chips used: {player.captaincyChipsUsed}/15)
+                                {player.name} (Chips used: {player.captaincyChipsUsed})
                               </option>
                             ))}
                         </select>
@@ -1593,6 +1608,44 @@ export default function AdminDashboard() {
                 {/* Current Captains */}
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur">
                   <h3 className="text-xl font-bold text-white mb-4">Current Captain Picks</h3>
+                  
+                  {/* Filters */}
+                  <div className="flex flex-wrap gap-4 mb-4">
+                    <div className="min-w-[140px]">
+                      <label className="block text-xs text-gray-400 mb-1">Gameweek</label>
+                      <select
+                        value={captainFilterGw}
+                        onChange={(e) => setCaptainFilterGw(e.target.value)}
+                        className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white focus:border-yellow-500 focus:outline-none"
+                      >
+                        <option value="" className="bg-slate-800">All GWs</option>
+                        {gameweeks
+                          .slice()
+                          .sort((a, b) => a.number - b.number)
+                          .map((gw) => (
+                            <option key={gw.id} value={String(gw.number)} className="bg-slate-800">
+                              GW{gw.number}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+                    <div className="min-w-[180px]">
+                      <label className="block text-xs text-gray-400 mb-1">Team</label>
+                      <select
+                        value={captainFilterTeam}
+                        onChange={(e) => setCaptainFilterTeam(e.target.value)}
+                        className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white focus:border-yellow-500 focus:outline-none"
+                      >
+                        <option value="" className="bg-slate-800">All Teams</option>
+                        {captainTeams.map((team) => (
+                          <option key={team.id} value={team.id} className="bg-slate-800">
+                            {team.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
                   {currentCaptains.length === 0 ? (
                     <p className="text-gray-500">No captain picks yet</p>
                   ) : (
@@ -1607,18 +1660,25 @@ export default function AdminDashboard() {
                           </tr>
                         </thead>
                         <tbody>
-                          {currentCaptains.slice(0, 20).map((cap, idx) => (
-                            <tr key={idx} className="border-b border-white/5">
-                              <td className="py-3 px-2 text-white">{cap.teamName}</td>
-                              <td className="py-3 px-2 text-gray-300">GW{cap.gameweek}</td>
-                              <td className="py-3 px-2 text-gray-300">{cap.playerName}</td>
-                              <td className="py-3 px-2">
-                                <span className={cap.isValid ? "text-green-400" : "text-red-400"}>
-                                  {cap.isValid ? "Valid" : "Invalid (Late)"}
-                                </span>
-                              </td>
-                            </tr>
-                          ))}
+                          {currentCaptains
+                            .filter((cap) => {
+                              if (captainFilterGw && String(cap.gameweek) !== captainFilterGw) return false;
+                              if (captainFilterTeam && cap.teamId !== captainFilterTeam) return false;
+                              return true;
+                            })
+                            .sort((a, b) => a.teamName.localeCompare(b.teamName))
+                            .map((cap, idx) => (
+                              <tr key={idx} className="border-b border-white/5">
+                                <td className="py-3 px-2 text-white">{cap.teamName}</td>
+                                <td className="py-3 px-2 text-gray-300">GW{cap.gameweek}</td>
+                                <td className="py-3 px-2 text-gray-300">{cap.playerName}</td>
+                                <td className="py-3 px-2">
+                                  <span className={cap.isValid ? "text-green-400" : "text-red-400"}>
+                                    {cap.isValid ? "Valid" : "Invalid (Late)"}
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
                         </tbody>
                       </table>
                     </div>
@@ -1763,14 +1823,34 @@ export default function AdminDashboard() {
                 {/* Team Chips Status */}
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur">
                   <h3 className="text-xl font-bold text-white mb-4">Team Chips Status</h3>
+
+                  {/* Team Filter */}
+                  <div className="flex flex-wrap gap-4 mb-4">
+                    <div className="min-w-[180px]">
+                      <label className="block text-xs text-gray-400 mb-1">Team</label>
+                      <select
+                        value={chipFilterTeam}
+                        onChange={(e) => setChipFilterTeam(e.target.value)}
+                        className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white focus:border-yellow-500 focus:outline-none"
+                      >
+                        <option value="" className="bg-slate-800">All Teams</option>
+                        {chipTeams.map((team) => (
+                          <option key={team.id} value={team.id} className="bg-slate-800">
+                            {team.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
                   {chipTeams.length === 0 ? (
                     <p className="text-gray-500">No teams found</p>
                   ) : (
                     <div className="space-y-4">
-                      {chipTeams.map((team) => (
+                      {chipTeams.filter((team) => !chipFilterTeam || team.id === chipFilterTeam).map((team) => (
                         <div key={team.id} className="p-4 rounded-lg bg-white/5">
                           <div className="font-semibold text-white mb-3">{team.name} (Group {team.group})</div>
-                          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 text-sm">
                             {/* Set 1 */}
                             <div className="flex flex-col gap-1">
                               <div className="flex items-center gap-2">

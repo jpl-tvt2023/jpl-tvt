@@ -71,9 +71,6 @@ export default function SignInPage() {
           <Link href="/playoffs" className="text-gray-300 hover:text-white transition">
             Playoffs
           </Link>
-          <Link href="/rules" className="text-gray-300 hover:text-white transition">
-            Rules
-          </Link>
         </div>
       </nav>
 

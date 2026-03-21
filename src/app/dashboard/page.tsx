@@ -243,6 +243,7 @@ export default function DashboardPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitMessage, setSubmitMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [showOpponentPlayers, setShowOpponentPlayers] = useState(false);
+  const [showAllCaptains, setShowAllCaptains] = useState(false);
 
   const fetchDashboard = useCallback(async (gw?: number) => {
     try {
@@ -443,12 +444,12 @@ export default function DashboardPage() {
       <div className="mx-auto max-w-7xl px-4 sm:px-6 py-6 sm:py-8">
         {/* Header */}
         <div className="mb-8">
-          <div className="flex items-center gap-4 mb-2">
-            <h1 className="text-4xl font-bold text-white">{data.team.name}</h1>
-            <span className="text-lg text-gray-400">({data.team.abbreviation})</span>
+          <div className="flex flex-wrap items-center gap-2 sm:gap-4 mb-2">
+            <h1 className="text-2xl sm:text-4xl font-bold text-white">{data.team.name}</h1>
+            <span className="text-sm sm:text-lg text-gray-400">({data.team.abbreviation})</span>
             <ZoneBadge zone={data.leaguePosition.zone} />
           </div>
-          <p className="text-gray-400">
+          <p className="text-sm sm:text-base text-gray-400">
             Group {data.team.group} &bull; Rank #{data.leaguePosition.groupRank} &bull; {data.team.leaguePoints} Points
           </p>
         </div>
@@ -690,18 +691,18 @@ export default function DashboardPage() {
                   <button
                     onClick={handlePrevGw}
                     disabled={!data.minCompletedGw || !viewedGw || viewedGw <= data.minCompletedGw}
-                    className="text-3xl px-3 py-1 rounded-full bg-purple-900/60 border border-purple-400 text-yellow-300 shadow-lg hover:bg-yellow-400 hover:text-purple-900 transition disabled:opacity-30 disabled:bg-gray-700 disabled:text-gray-400"
+                    className="text-xl sm:text-3xl px-2 sm:px-3 py-1 rounded-full bg-purple-900/60 border border-purple-400 text-yellow-300 shadow-lg hover:bg-yellow-400 hover:text-purple-900 transition disabled:opacity-30 disabled:bg-gray-700 disabled:text-gray-400"
                     aria-label="Previous GW"
                   >
                     &#8592;
                   </button>
-                  <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                  <h2 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
                     <span className="text-yellow-400">📊</span> GW{data.lastGwResult.gameweek} Result
                   </h2>
                   <button
                     onClick={handleNextGw}
                     disabled={!data.maxCompletedGw || !viewedGw || viewedGw >= data.maxCompletedGw}
-                    className="text-3xl px-3 py-1 rounded-full bg-purple-900/60 border border-purple-400 text-yellow-300 shadow-lg hover:bg-yellow-400 hover:text-purple-900 transition disabled:opacity-30 disabled:bg-gray-700 disabled:text-gray-400"
+                    className="text-xl sm:text-3xl px-2 sm:px-3 py-1 rounded-full bg-purple-900/60 border border-purple-400 text-yellow-300 shadow-lg hover:bg-yellow-400 hover:text-purple-900 transition disabled:opacity-30 disabled:bg-gray-700 disabled:text-gray-400"
                     aria-label="Next GW"
                   >
                     &#8594;
@@ -709,13 +710,13 @@ export default function DashboardPage() {
                 </div>
                 
                 {/* Score Header */}
-                <div className="flex items-center justify-between mb-6">
+                <div className="flex flex-col sm:flex-row items-center justify-between mb-6 gap-2 sm:gap-0">
                   <div className="flex-1 text-center">
                     <div className="text-xs text-gray-400 mb-1">{data.lastGwResult.isHome ? "HOME" : "AWAY"}</div>
-                    <div className="text-lg font-bold text-white">{data.lastGwResult.myTeamName}</div>
+                    <div className="text-base sm:text-lg font-bold text-white">{data.lastGwResult.myTeamName}</div>
                   </div>
-                  <div className="px-6 text-center">
-                    <div className={`text-4xl font-bold ${
+                  <div className="px-4 sm:px-6 text-center">
+                    <div className={`text-3xl sm:text-4xl font-bold ${
                       data.lastGwResult.result === "W" ? "text-green-400" :
                       data.lastGwResult.result === "L" ? "text-red-400" : "text-gray-400"
                     }`}>
@@ -726,7 +727,9 @@ export default function DashboardPage() {
                         data.lastGwResult.result === "W" ? "bg-green-500/20 text-green-400" :
                         data.lastGwResult.result === "L" ? "bg-red-500/20 text-red-400" : "bg-gray-500/20 text-gray-400"
                       }`}>
-                        {data.lastGwResult.result === "W" ? "WIN +2" : data.lastGwResult.result === "D" ? "DRAW +1" : "LOSS +0"}
+                        {data.lastGwResult.gameweek <= 30
+                          ? (data.lastGwResult.result === "W" ? "WIN +2" : data.lastGwResult.result === "D" ? "DRAW +1" : "LOSS +0")
+                          : (data.lastGwResult.result === "W" ? "WIN" : data.lastGwResult.result === "D" ? "DRAW" : "LOSS")}
                       </span>
                       {data.lastGwResult.gotBonus && (
                         <span className="px-2 py-0.5 rounded text-xs font-semibold bg-yellow-500/20 text-yellow-400">
@@ -737,7 +740,7 @@ export default function DashboardPage() {
                   </div>
                   <div className="flex-1 text-center">
                     <div className="text-xs text-gray-400 mb-1">{data.lastGwResult.isHome ? "AWAY" : "HOME"}</div>
-                    <div className="text-lg font-bold text-white">{data.lastGwResult.opponent}</div>
+                    <div className="text-base sm:text-lg font-bold text-white">{data.lastGwResult.opponent}</div>
                   </div>
                 </div>
                 
@@ -835,7 +838,7 @@ export default function DashboardPage() {
               {/* Recent Form */}
               <div className="rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur">
                 <h2 className="text-lg font-bold text-white mb-4">Recent Form</h2>
-                <div className="flex gap-2 mb-4">
+                <div className="flex flex-wrap gap-2 mb-4">
                   {data.recentForm.map((f, i) => (
                     <div key={i} className="text-center">
                       <FormBadge result={f.result} gotBonus={f.gotBonus} />
@@ -900,7 +903,7 @@ export default function DashboardPage() {
                   <div key={i} className="p-4 rounded-xl bg-white/5">
                     <div className="font-semibold text-white mb-2">{member.name}</div>
                     <div className="text-sm text-gray-400 mb-3">
-                      Captaincy chips: {15 - member.captaincyChipsUsed}/15 remaining
+                      Captaincy chips used: {member.captaincyChipsUsed}
                     </div>
                     <div className="flex gap-2">
                       <a
@@ -1006,9 +1009,12 @@ export default function DashboardPage() {
 
             {/* Recent Captains */}
             <div className="rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur">
-              <h2 className="text-lg font-bold text-white mb-4">Recent Captains</h2>
+              <h2 className="text-lg font-bold text-white mb-4">Captain History</h2>
               <div className="space-y-2">
-                {data.captaincyStatus.recentCaptains.map((c, i) => (
+                {(showAllCaptains
+                  ? data.captaincyStatus.recentCaptains
+                  : data.captaincyStatus.recentCaptains.slice(0, 5)
+                ).map((c, i) => (
                   <div key={i} className="flex items-center justify-between p-3 rounded-lg bg-white/5">
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-gray-500 w-8">GW{c.gameweek}</span>
@@ -1019,6 +1025,14 @@ export default function DashboardPage() {
                 ))}
                 {data.captaincyStatus.recentCaptains.length === 0 && (
                   <div className="text-gray-400 text-center py-4">No captain history</div>
+                )}
+                {data.captaincyStatus.recentCaptains.length > 5 && (
+                  <button
+                    onClick={() => setShowAllCaptains(!showAllCaptains)}
+                    className="w-full text-center text-sm text-yellow-400 hover:text-yellow-300 transition py-2"
+                  >
+                    {showAllCaptains ? "Show Less ▲" : `Show All (${data.captaincyStatus.recentCaptains.length}) ▼`}
+                  </button>
                 )}
               </div>
             </div>
