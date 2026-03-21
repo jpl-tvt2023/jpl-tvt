@@ -1,7 +1,27 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
+
+interface LivePlayerScore {
+  name: string;
+  fplScore: number;
+  transferHits: number;
+  isCaptain: boolean;
+  finalScore: number;
+}
+
+interface LiveFixtureScore {
+  fixtureId: string;
+  homeTeamName: string;
+  awayTeamName: string;
+  homeTeamAbbr: string;
+  awayTeamAbbr: string;
+  homeScore: number;
+  awayScore: number;
+  homePlayers: LivePlayerScore[];
+  awayPlayers: LivePlayerScore[];
+}
 
 interface Fixture {
   id: string;
@@ -23,19 +43,33 @@ interface GameweekFixtures {
 
 function FixtureCard({
   fixture,
+  liveData,
 }: {
   fixture: Fixture;
+  liveData?: LiveFixtureScore;
 }) {
+  const [expanded, setExpanded] = useState(false);
   const result = fixture.result;
   const isResult = result !== undefined && result !== null;
-  const homeWin = isResult && result.homeScore > result.awayScore;
-  const awayWin = isResult && result.awayScore > result.homeScore;
-  const draw = isResult && result.homeScore === result.awayScore;
+  const isLive = !isResult && !!liveData;
+
+  const homeScore = isResult ? result.homeScore : liveData?.homeScore;
+  const awayScore = isResult ? result.awayScore : liveData?.awayScore;
+  const hasScore = homeScore !== undefined && awayScore !== undefined;
+
+  const homeWin = hasScore && homeScore! > awayScore!;
+  const awayWin = hasScore && awayScore! > homeScore!;
+  const draw = hasScore && homeScore === awayScore;
 
   return (
-    <div className="rounded-xl border border-white/10 bg-white/5 p-4 backdrop-blur">
-      {isResult && (
-        <div className="flex justify-end mb-2">
+    <div
+      className={`rounded-xl border p-4 backdrop-blur transition ${
+        isLive ? "border-green-500/30 bg-green-500/5" : "border-white/10 bg-white/5"
+      } ${isLive && liveData?.homePlayers.length ? "cursor-pointer" : ""}`}
+      onClick={() => isLive && liveData?.homePlayers.length && setExpanded(!expanded)}
+    >
+      <div className="flex justify-end mb-2">
+        {isResult && (
           <span
             className={`text-xs font-medium px-2 py-0.5 rounded ${
               draw ? "bg-gray-500/20 text-gray-400" : "bg-green-500/20 text-green-400"
@@ -43,8 +77,14 @@ function FixtureCard({
           >
             {draw ? "Draw" : "Final"}
           </span>
-        </div>
-      )}
+        )}
+        {isLive && (
+          <span className="text-xs font-medium px-2 py-0.5 rounded bg-green-500/20 text-green-400 flex items-center gap-1">
+            <span className="h-1.5 w-1.5 rounded-full bg-green-400 animate-pulse"></span>
+            LIVE
+          </span>
+        )}
+      </div>
 
       <div className="flex items-center justify-between">
         <div className={`flex-1 text-left ${homeWin ? "text-green-400" : "text-white"}`}>
@@ -52,14 +92,14 @@ function FixtureCard({
         </div>
 
         <div className="flex items-center gap-2 px-3">
-          {isResult ? (
+          {hasScore ? (
             <>
               <span
                 className={`text-xl font-bold ${
                   homeWin ? "text-green-400" : draw ? "text-gray-400" : "text-white"
                 }`}
               >
-                {result.homeScore}
+                {homeScore}
               </span>
               <span className="text-gray-500">-</span>
               <span
@@ -67,7 +107,7 @@ function FixtureCard({
                   awayWin ? "text-green-400" : draw ? "text-gray-400" : "text-white"
                 }`}
               >
-                {result.awayScore}
+                {awayScore}
               </span>
             </>
           ) : (
@@ -79,6 +119,46 @@ function FixtureCard({
           <div className="font-semibold text-sm">{fixture.awayTeam.name}</div>
         </div>
       </div>
+
+      {/* Expanded player breakdown for live matches */}
+      {isLive && expanded && liveData && liveData.homePlayers.length > 0 && (
+        <div className="mt-3 pt-3 border-t border-white/10 grid grid-cols-2 gap-3 text-xs">
+          <div>
+            {liveData.homePlayers.map((p, i) => (
+              <div key={i} className="flex justify-between py-0.5">
+                <span className="text-gray-300">
+                  {p.name}{p.isCaptain ? " (C)" : ""}
+                </span>
+                <span className={p.isCaptain ? "text-yellow-400 font-semibold" : "text-white"}>
+                  {p.isCaptain
+                    ? `${p.fplScore}${p.transferHits > 0 ? ` - ${p.transferHits}` : ""} ×2 = ${p.finalScore}`
+                    : p.finalScore}
+                </span>
+              </div>
+            ))}
+          </div>
+          <div>
+            {liveData.awayPlayers.map((p, i) => (
+              <div key={i} className="flex justify-between py-0.5">
+                <span className="text-gray-300">
+                  {p.name}{p.isCaptain ? " (C)" : ""}
+                </span>
+                <span className={p.isCaptain ? "text-yellow-400 font-semibold" : "text-white"}>
+                  {p.isCaptain
+                    ? `${p.fplScore}${p.transferHits > 0 ? ` - ${p.transferHits}` : ""} ×2 = ${p.finalScore}`
+                    : p.finalScore}
+                </span>
+              </div>
+            ))}
+          </div>
+          <div className="col-span-2 text-center text-gray-500 text-[10px] mt-1">
+            Tap to collapse
+          </div>
+        </div>
+      )}
+      {isLive && !expanded && liveData?.homePlayers.length ? (
+        <div className="text-center text-gray-500 text-[10px] mt-2">Tap for player breakdown</div>
+      ) : null}
     </div>
   );
 }
@@ -91,6 +171,38 @@ export default function FixturesPage() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [selectedGW, setSelectedGW] = useState<number | null>(null);
   const [availableGWs, setAvailableGWs] = useState<number[]>([]);
+  const [liveScores, setLiveScores] = useState<LiveFixtureScore[]>([]);
+  const [isLive, setIsLive] = useState(false);
+  const [liveCachedAt, setLiveCachedAt] = useState<string | null>(null);
+
+  // Fetch live scores for selected GW
+  const fetchLiveScores = useCallback(async (gw: number) => {
+    try {
+      const res = await fetch(`/api/fixtures/live?gameweek=${gw}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.isLive) {
+          setLiveScores(data.fixtures || []);
+          setIsLive(true);
+          setLiveCachedAt(data.cachedAt || null);
+        } else {
+          setLiveScores([]);
+          setIsLive(false);
+          setLiveCachedAt(null);
+        }
+      }
+    } catch {
+      // Silently fail — live scores are optional
+    }
+  }, []);
+
+  // Poll live scores every 10 minutes when the GW is live
+  useEffect(() => {
+    if (!selectedGW) return;
+    fetchLiveScores(selectedGW);
+    const interval = setInterval(() => fetchLiveScores(selectedGW), 10 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [selectedGW, fetchLiveScores]);
 
   useEffect(() => {
     // Check auth status
@@ -214,9 +326,11 @@ export default function FixturesPage() {
           <Link href="/playoffs" className="text-gray-300 hover:text-white transition">
             Playoffs
           </Link>
-          <Link href="/rules" className="text-gray-300 hover:text-white transition">
-            Rules
-          </Link>
+          {isLoggedIn && (
+            <Link href="/rules" className="text-gray-300 hover:text-white transition">
+              Rules
+            </Link>
+          )}
           {isLoggedIn ? (
             <button
               onClick={handleSignOut}
@@ -296,10 +410,15 @@ export default function FixturesPage() {
             </div>
 
             {/* Status Badge */}
-            <div className="flex items-center justify-center gap-4 mb-6">
+            <div className="flex flex-wrap items-center justify-center gap-4 mb-6">
               {hasResults ? (
                 <span className="px-4 py-1 rounded-full bg-green-500/20 text-green-400 text-sm font-medium">
                   Results Available
+                </span>
+              ) : isLive ? (
+                <span className="px-4 py-1 rounded-full bg-green-500/20 text-green-400 text-sm font-medium flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full bg-green-400 animate-pulse"></span>
+                  Live Scores
                 </span>
               ) : (
                 <span className="px-4 py-1 rounded-full bg-yellow-500/20 text-yellow-400 text-sm font-medium flex items-center gap-2">
@@ -307,8 +426,13 @@ export default function FixturesPage() {
                   Upcoming
                 </span>
               )}
-              {deadline && !hasResults && (
+              {deadline && !hasResults && !isLive && (
                 <span className="text-sm text-gray-400">Deadline: {formatDeadline(deadline)}</span>
+              )}
+              {isLive && liveCachedAt && (
+                <span className="text-xs text-gray-500">
+                  Updated: {new Date(liveCachedAt).toLocaleTimeString()}
+                </span>
               )}
             </div>
 
@@ -323,7 +447,11 @@ export default function FixturesPage() {
                 <div className="space-y-3">
                   {groupAFixtures.length > 0 ? (
                     groupAFixtures.map((fixture: Fixture) => (
-                      <FixtureCard key={fixture.id} fixture={fixture} />
+                      <FixtureCard
+                        key={fixture.id}
+                        fixture={fixture}
+                        liveData={liveScores.find((l) => l.fixtureId === fixture.id)}
+                      />
                     ))
                   ) : (
                     <div className="text-center text-gray-400 py-8">No fixtures</div>
@@ -340,7 +468,11 @@ export default function FixturesPage() {
                 <div className="space-y-3">
                   {groupBFixtures.length > 0 ? (
                     groupBFixtures.map((fixture: Fixture) => (
-                      <FixtureCard key={fixture.id} fixture={fixture} />
+                      <FixtureCard
+                        key={fixture.id}
+                        fixture={fixture}
+                        liveData={liveScores.find((l) => l.fixtureId === fixture.id)}
+                      />
                     ))
                   ) : (
                     <div className="text-center text-gray-400 py-8">No fixtures</div>

@@ -46,6 +46,15 @@ function StandingsTable({ teams, group }: { teams: TeamStanding[]; group: string
 
   const handleMouseLeave = () => setTooltip(null);
 
+  const handleClick = (e: React.MouseEvent, team: TeamStanding) => {
+    if (tooltip?.team.teamId === team.teamId) {
+      setTooltip(null);
+    } else {
+      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      setTooltip({ team, x: rect.left, y: rect.top + rect.height / 2 });
+    }
+  };
+
   return (
     <>
       {/* Fixed-position tooltip — outside any overflow container */}
@@ -185,6 +194,7 @@ function StandingsTable({ teams, group }: { teams: TeamStanding[]; group: string
                     className="px-2 py-2 text-center text-purple-400"
                     onMouseEnter={(e) => handleMouseEnter(e, team)}
                     onMouseLeave={handleMouseLeave}
+                    onClick={(e) => handleClick(e, team)}
                   >
                     <span className="cursor-help underline decoration-dotted underline-offset-2">
                       {team.cbpPoints}
@@ -299,9 +309,11 @@ export default function StandingsPage() {
           <Link href="/playoffs" className="text-gray-300 hover:text-white transition">
             Playoffs
           </Link>
-          <Link href="/rules" className="text-gray-300 hover:text-white transition">
-            Rules
-          </Link>
+          {isLoggedIn && (
+            <Link href="/rules" className="text-gray-300 hover:text-white transition">
+              Rules
+            </Link>
+          )}
           {isLoggedIn ? (
             <button
               onClick={handleSignOut}

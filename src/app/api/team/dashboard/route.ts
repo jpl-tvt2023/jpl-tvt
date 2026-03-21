@@ -440,7 +440,6 @@ export async function GET(request: NextRequest) {
       },
       recentCaptains: [...captainHistory]
         .sort((a, b) => b.gameweek.number - a.gameweek.number)
-        .slice(0, 5)
         .map(c => ({
           gameweek: c.gameweek.number,
           playerName: c.player.name,

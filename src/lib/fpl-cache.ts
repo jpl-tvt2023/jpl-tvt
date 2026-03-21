@@ -16,6 +16,7 @@ function getRedis(): Redis | null {
 }
 
 const CACHE_TTL = 60 * 60 * 24; // 24 hours
+const LIVE_CACHE_TTL = 60 * 10; // 10 minutes
 
 interface CachedScore {
   points: number;
@@ -162,4 +163,63 @@ export async function getCacheStats(): Promise<{ gameweek: number; entries: numb
   }
 
   return stats;
+}
+
+// ============================================
+// Live Score Cache (10-minute TTL)
+// ============================================
+
+export interface LiveFixtureScore {
+  fixtureId: string;
+  homeTeamName: string;
+  awayTeamName: string;
+  homeTeamAbbr: string;
+  awayTeamAbbr: string;
+  homeScore: number;
+  awayScore: number;
+  homePlayers: { name: string; fplScore: number; transferHits: number; isCaptain: boolean; finalScore: number }[];
+  awayPlayers: { name: string; fplScore: number; transferHits: number; isCaptain: boolean; finalScore: number }[];
+}
+
+export interface LiveGameweekData {
+  gameweek: number;
+  fixtures: LiveFixtureScore[];
+  cachedAt: string;
+}
+
+function getLiveKey(gameweek: number): string {
+  return `live:gw${gameweek}:all`;
+}
+
+/**
+ * Get cached live scores for a gameweek
+ */
+export async function getLiveCachedScores(
+  gameweek: number
+): Promise<LiveGameweekData | null> {
+  const r = getRedis();
+  if (!r) return null;
+  const data = await r.get<LiveGameweekData>(getLiveKey(gameweek));
+  return data || null;
+}
+
+/**
+ * Set cached live scores for a gameweek (10-min TTL)
+ */
+export async function setLiveCachedScores(
+  gameweek: number,
+  data: LiveGameweekData
+): Promise<void> {
+  const r = getRedis();
+  if (!r) return;
+  await r.set(getLiveKey(gameweek), data, { ex: LIVE_CACHE_TTL });
+}
+
+/**
+ * Clear live cache for a specific gameweek
+ */
+export async function clearLiveCache(gameweek: number): Promise<void> {
+  const r = getRedis();
+  if (!r) return;
+  await r.del(getLiveKey(gameweek));
 }

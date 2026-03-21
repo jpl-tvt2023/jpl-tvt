@@ -2,13 +2,16 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 export default function RulesPage() {
+  const router = useRouter();
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isChecking, setIsChecking] = useState(true);
 
   useEffect(() => {
-    // Check auth status
+    // Check auth status — redirect to signin if not authenticated
     const checkAuth = async () => {
       try {
         const res = await fetch("/api/auth/me");
@@ -17,21 +20,30 @@ export default function RulesPage() {
           setIsLoggedIn(true);
           setIsAdmin(data.type === "admin");
         } else {
-          setIsLoggedIn(false);
-          setIsAdmin(false);
+          router.replace("/signin");
+          return;
         }
       } catch {
-        setIsLoggedIn(false);
-        setIsAdmin(false);
+        router.replace("/signin");
+        return;
       }
+      setIsChecking(false);
     };
     checkAuth();
-  }, []);
+  }, [router]);
 
   const handleSignOut = async () => {
     await fetch("/api/auth/signout", { method: "POST" });
     window.location.href = "/signin";
   };
+
+  if (isChecking) {
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center">
+        <div className="text-white">Loading...</div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-900 via-purple-900 to-slate-900">

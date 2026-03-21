@@ -63,9 +63,11 @@ export default function Home() {
             <Link href="/playoffs" className="text-gray-300 hover:text-white transition">
               Playoffs
             </Link>
-            <Link href="/rules" className="text-gray-300 hover:text-white transition">
-              Rules
-            </Link>
+            {isLoggedIn && (
+              <Link href="/rules" className="text-gray-300 hover:text-white transition">
+                Rules
+              </Link>
+            )}
             {isLoggedIn ? (
               <button
                 onClick={handleSignOut}
@@ -117,12 +119,6 @@ export default function Home() {
               className="w-full sm:w-auto rounded-full border border-white/20 bg-white/5 px-8 py-4 text-lg font-semibold text-white hover:bg-white/10 transition"
             >
               View Playoffs
-            </Link>
-            <Link
-              href="/rules"
-              className="w-full sm:w-auto rounded-full border border-white/20 bg-white/5 px-8 py-4 text-lg font-semibold text-white hover:bg-white/10 transition"
-            >
-              View Rules
             </Link>
           </div>
 
@@ -208,7 +204,6 @@ export default function Home() {
               <span className="text-sm text-gray-400">TVT Fantasy Super League © 2026</span>
             </div>
             <div className="flex items-center gap-6 text-sm text-gray-400">
-              <Link href="/rules" className="hover:text-white transition">Rules</Link>
               <Link href="/standings" className="hover:text-white transition">Standings</Link>
               <Link href="/fixtures" className="hover:text-white transition">Fixtures</Link>
             </div>

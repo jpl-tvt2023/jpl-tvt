@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, gameweeks, fixtures, results } from "@/lib/db";
 import { eq, asc, isNull } from "drizzle-orm";
+import { clearLiveCache } from "@/lib/fpl-cache";
 
 /**
  * GET /api/cron/process-scores
@@ -46,6 +47,14 @@ export async function GET(request: NextRequest) {
         success: true,
         message: "No gameweek needs processing",
       });
+    }
+
+    // Clear live cache for this gameweek before processing final scores
+    try {
+      await clearLiveCache(targetGW);
+      console.log(`Cron: Cleared live cache for GW${targetGW}`);
+    } catch (e) {
+      console.error(`Cron: Failed to clear live cache for GW${targetGW}:`, e);
     }
 
     // Call the existing gameweek processing endpoint internally
