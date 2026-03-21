@@ -63,31 +63,17 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ isLive: false, fixtures: [], reason: "already_processed" });
     }
 
-    // Check live cache
+    // Check live cache first
     const cached = await getLiveCachedScores(gwNumber);
-    if (cached) {
+    if (cached && cached.fixtures && cached.fixtures.length > 0) {
       return NextResponse.json({ isLive: true, ...cached });
     }
 
-    // Get all captain picks for this GW
-    const captainPicks = await db.query.gameweekCaptains.findMany({
-      where: eq(gameweekCaptains.gameweekId, gw.id),
-      with: { player: true },
-    });
-
-    // Build lookup: teamId → captainPlayerId (the player row ID, not fplId)
-    const captainByTeam = new Map<string, string>();
-    for (const pick of captainPicks) {
-      captainByTeam.set(pick.player.teamId, pick.player.id);
-    }
-
-    // Calculate live scores for each fixture
-    const liveFixtures: LiveFixtureScore[] = [];
-
+    // Cache miss - check if we have DB results (fallback when Redis is empty)
+    const dbFixtures: LiveFixtureScore[] = [];
     for (const fixture of gwFixtures) {
-      // Skip fixtures that already have results
       if (fixture.result) {
-        liveFixtures.push({
+        dbFixtures.push({
           fixtureId: fixture.id,
           gameweek: gwNumber,
           homeTeamName: fixture.homeTeam.name,
@@ -99,61 +85,104 @@ export async function GET(request: NextRequest) {
           homePlayers: [],
           awayPlayers: [],
         });
-        continue;
-      }
-
-      try {
-        const homeScore = await calculateLiveTeamScore(
-          fixture.homeTeam.players,
-          captainByTeam.get(fixture.homeTeamId),
-          gwNumber
-        );
-        const awayScore = await calculateLiveTeamScore(
-          fixture.awayTeam.players,
-          captainByTeam.get(fixture.awayTeamId),
-          gwNumber
-        );
-
-        liveFixtures.push({
-          fixtureId: fixture.id,
-          gameweek: gwNumber,
-          homeTeamName: fixture.homeTeam.name,
-          awayTeamName: fixture.awayTeam.name,
-          homeTeamAbbr: fixture.homeTeam.abbreviation,
-          awayTeamAbbr: fixture.awayTeam.abbreviation,
-          homeScore: homeScore.total,
-          awayScore: awayScore.total,
-          homePlayers: homeScore.players,
-          awayPlayers: awayScore.players,
-        });
-      } catch (err) {
-        console.error(`Live score error for fixture ${fixture.id}:`, err);
-        // Return partial data with null scores for failed fixtures
-        liveFixtures.push({
-          fixtureId: fixture.id,
-          gameweek: gwNumber,
-          homeTeamName: fixture.homeTeam.name,
-          awayTeamName: fixture.awayTeam.name,
-          homeTeamAbbr: fixture.homeTeam.abbreviation,
-          awayTeamAbbr: fixture.awayTeam.abbreviation,
-          homeScore: 0,
-          awayScore: 0,
-          homePlayers: [],
-          awayPlayers: [],
-        });
       }
     }
 
-    const liveData: LiveGameweekData = {
+    // If we have DB results, return those (fallback when Redis is empty)
+    if (dbFixtures.length > 0) {
+      return NextResponse.json({
+        isLive: false,
+        gameweek: gwNumber,
+        fixtures: dbFixtures,
+        source: "database",
+        cachedAt: new Date().toISOString(),
+      });
+    }
+
+    // Try to fetch fresh from FPL API
+    try {
+      // Get all captain picks for this GW
+      const captainPicks = await db.query.gameweekCaptains.findMany({
+        where: eq(gameweekCaptains.gameweekId, gw.id),
+        with: { player: true },
+      });
+
+      // Build lookup: teamId → captainPlayerId (the player row ID, not fplId)
+      const captainByTeam = new Map<string, string>();
+      for (const pick of captainPicks) {
+        captainByTeam.set(pick.player.teamId, pick.player.id);
+      }
+
+      // Calculate live scores for each fixture
+      const liveFixtures: LiveFixtureScore[] = [];
+
+      for (const fixture of gwFixtures) {
+        try {
+          const homeScore = await calculateLiveTeamScore(
+            fixture.homeTeam.players,
+            captainByTeam.get(fixture.homeTeamId),
+            gwNumber
+          );
+          const awayScore = await calculateLiveTeamScore(
+            fixture.awayTeam.players,
+            captainByTeam.get(fixture.awayTeamId),
+            gwNumber
+          );
+
+          liveFixtures.push({
+            fixtureId: fixture.id,
+            gameweek: gwNumber,
+            homeTeamName: fixture.homeTeam.name,
+            awayTeamName: fixture.awayTeam.name,
+            homeTeamAbbr: fixture.homeTeam.abbreviation,
+            awayTeamAbbr: fixture.awayTeam.abbreviation,
+            homeScore: homeScore.total,
+            awayScore: awayScore.total,
+            homePlayers: homeScore.players,
+            awayPlayers: awayScore.players,
+          });
+        } catch (err) {
+          console.error(`Live score error for fixture ${fixture.id}:`, err);
+          // Return partial data with null scores for failed fixtures
+          liveFixtures.push({
+            fixtureId: fixture.id,
+            gameweek: gwNumber,
+            homeTeamName: fixture.homeTeam.name,
+            awayTeamName: fixture.awayTeam.name,
+            homeTeamAbbr: fixture.homeTeam.abbreviation,
+            awayTeamAbbr: fixture.awayTeam.abbreviation,
+            homeScore: 0,
+            awayScore: 0,
+            homePlayers: [],
+            awayPlayers: [],
+          });
+        }
+      }
+
+      if (liveFixtures.length > 0) {
+        const liveData: LiveGameweekData = {
+          gameweek: gwNumber,
+          fixtures: liveFixtures,
+          cachedAt: new Date().toISOString(),
+        };
+
+        // Cache for 10 minutes
+        await setLiveCachedScores(gwNumber, liveData);
+
+        return NextResponse.json({ isLive: true, ...liveData });
+      }
+    } catch (error) {
+      console.error(`Error fetching live scores for GW${gwNumber}:`, error);
+      // Fallback already handled above with DB results
+    }
+
+    // Ultimate fallback - return empty
+    return NextResponse.json({
+      isLive: false,
       gameweek: gwNumber,
-      fixtures: liveFixtures,
+      fixtures: [],
       cachedAt: new Date().toISOString(),
-    };
-
-    // Cache for 10 minutes
-    await setLiveCachedScores(gwNumber, liveData);
-
-    return NextResponse.json({ isLive: true, ...liveData });
+    });
   } catch (error) {
     console.error("Live fixtures error:", error);
     return NextResponse.json(
