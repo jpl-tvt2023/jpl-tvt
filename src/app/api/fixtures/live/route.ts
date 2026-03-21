@@ -89,6 +89,7 @@ export async function GET(request: NextRequest) {
       if (fixture.result) {
         liveFixtures.push({
           fixtureId: fixture.id,
+          gameweek: gwNumber,
           homeTeamName: fixture.homeTeam.name,
           awayTeamName: fixture.awayTeam.name,
           homeTeamAbbr: fixture.homeTeam.abbreviation,
@@ -115,6 +116,7 @@ export async function GET(request: NextRequest) {
 
         liveFixtures.push({
           fixtureId: fixture.id,
+          gameweek: gwNumber,
           homeTeamName: fixture.homeTeam.name,
           awayTeamName: fixture.awayTeam.name,
           homeTeamAbbr: fixture.homeTeam.abbreviation,
@@ -129,6 +131,7 @@ export async function GET(request: NextRequest) {
         // Return partial data with null scores for failed fixtures
         liveFixtures.push({
           fixtureId: fixture.id,
+          gameweek: gwNumber,
           homeTeamName: fixture.homeTeam.name,
           awayTeamName: fixture.awayTeam.name,
           homeTeamAbbr: fixture.homeTeam.abbreviation,

@@ -171,6 +171,7 @@ export async function getCacheStats(): Promise<{ gameweek: number; entries: numb
 
 export interface LiveFixtureScore {
   fixtureId: string;
+  gameweek: number;          // Track which GW this score is from
   homeTeamName: string;
   awayTeamName: string;
   homeTeamAbbr: string;
