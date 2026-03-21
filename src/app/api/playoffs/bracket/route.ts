@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { playoffTies, challengerSurvivalEntries, fixtures, results, gameweeks, teams, groups } from "@/lib/db/schema";
+import { playoffTies, challengerSurvivalEntries, fixtures, results, gameweeks, teams, groups, gameweekCaptains } from "@/lib/db/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
+import { fetchTeamGameweekPicks } from "@/lib/fpl";
 
 // Seeding tables (same as generate-playoffs)
 const RO16_SEEDING: [string, string, number, string, number][] = [
@@ -77,7 +78,10 @@ export async function GET() {
     const latestCompletedGw = await getLatestCompletedGw();
 
     if (isLive) {
-      return NextResponse.json(await buildLiveBracket(latestCompletedGw));
+      const bracket = await buildLiveBracket(latestCompletedGw);
+      // Always fetch fresh live scores from FPL API for GW31-38
+      const liveScores = await fetchLiveScoresForAllPlayoffGws();
+      return NextResponse.json({ ...bracket, liveScores });
     }
 
     // Not yet generated — show from standings
@@ -97,6 +101,147 @@ async function getLatestCompletedGw(): Promise<number> {
     .orderBy(desc(gameweeks.number))
     .limit(1);
   return latestResult.length > 0 ? latestResult[0].gwNumber : 0;
+}
+
+/**
+ * Fetch live scores from FPL API for ALL playoff GWs (31-38)
+ * This always uses fresh FPL API data, never stale database values
+ * The cron job will lock these into the database after GW conclusion
+ */
+async function fetchLiveScoresForAllPlayoffGws(): Promise<Record<number, any[]>> {
+  const liveScoresByGw: Record<number, any[]> = {};
+
+  try {
+    // Always fetch for GW 31-38
+    for (let gwNumber = 31; gwNumber <= 38; gwNumber++) {
+      try {
+        // Get gameweek record
+        const gwRecord = await db.query.gameweeks.findFirst({
+          where: eq(gameweeks.number, gwNumber),
+        });
+
+        if (!gwRecord) continue;
+
+        // Get all playoff fixtures for this GW
+        const gwFixtures = await db.query.fixtures.findMany({
+          where: and(
+            eq(fixtures.gameweekId, gwRecord.id),
+            eq(fixtures.isPlayoff, true)
+          ),
+          with: {
+            homeTeam: { with: { players: true } },
+            awayTeam: { with: { players: true } },
+          },
+        });
+
+        if (gwFixtures.length === 0) continue;
+
+        // Get captain picks for this GW
+        const captainPicks = await db.query.gameweekCaptains.findMany({
+          where: eq(gameweekCaptains.gameweekId, gwRecord.id),
+          with: { player: true },
+        });
+
+        const captainByTeam = new Map<string, string>();
+        for (const pick of captainPicks) {
+          captainByTeam.set(pick.player.teamId, pick.player.id);
+        }
+
+        // Calculate live scores for each fixture from FPL API
+        const gwLiveScores = [];
+        for (const fixture of gwFixtures) {
+          try {
+            const homeScore = await calculateLiveTeamScore(
+              fixture.homeTeam.players,
+              captainByTeam.get(fixture.homeTeamId),
+              gwNumber
+            );
+            const awayScore = await calculateLiveTeamScore(
+              fixture.awayTeam.players,
+              captainByTeam.get(fixture.awayTeamId),
+              gwNumber
+            );
+
+            gwLiveScores.push({
+              fixtureId: fixture.id,
+              homeTeamName: fixture.homeTeam.name,
+              awayTeamName: fixture.awayTeam.name,
+              homeTeamAbbr: fixture.homeTeam.abbreviation,
+              awayTeamAbbr: fixture.awayTeam.abbreviation,
+              homeScore: homeScore.total,
+              awayScore: awayScore.total,
+              homePlayers: homeScore.players,
+              awayPlayers: awayScore.players,
+            });
+          } catch (err) {
+            console.error(`Live score error for fixture ${fixture.id}:`, err);
+            // Silently skip this fixture, don't include it
+          }
+        }
+
+        if (gwLiveScores.length > 0) {
+          liveScoresByGw[gwNumber] = gwLiveScores;
+        }
+      } catch (err) {
+        console.error(`Error fetching live scores for GW${gwNumber}:`, err);
+        // Continue to next GW
+      }
+    }
+  } catch (error) {
+    console.error("Error in fetchLiveScoresForAllPlayoffGws:", error);
+  }
+
+  return liveScoresByGw;
+}
+
+/**
+ * Calculate live score for a TVT team (2 FPL players + captaincy doubling)
+ * Always fetches from FPL API, never uses database
+ */
+async function calculateLiveTeamScore(
+  teamPlayers: { id: string; name: string; fplId: string }[],
+  captainPlayerId: string | undefined,
+  gameweek: number
+): Promise<{
+  total: number;
+  players: { name: string; fplScore: number; transferHits: number; isCaptain: boolean; finalScore: number }[];
+}> {
+  const playerScores = [];
+  let total = 0;
+
+  for (const player of teamPlayers) {
+    try {
+      // Fetch from FPL API - always fresh data
+      const picks = await fetchTeamGameweekPicks(player.fplId, gameweek);
+      const fplScore = picks.entry_history.points;
+      const transferHits = picks.entry_history.event_transfers_cost;
+      const netScore = fplScore - transferHits;
+      const isCaptain = captainPlayerId === player.id;
+      const finalScore = isCaptain ? netScore * 2 : netScore;
+
+      playerScores.push({
+        name: player.name,
+        fplScore,
+        transferHits,
+        isCaptain,
+        finalScore,
+      });
+
+      total += finalScore;
+    } catch (err) {
+      console.error(`Failed to fetch FPL data for player ${player.fplId} in GW${gameweek}:`, err);
+      // Use 0 for this player
+      playerScores.push({
+        name: player.name,
+        fplScore: 0,
+        transferHits: 0,
+        isCaptain: false,
+        finalScore: 0,
+      });
+    }
+  }
+
+  return { total, players: playerScores };
 }
 
 // ============================================

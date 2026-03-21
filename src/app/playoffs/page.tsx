@@ -64,6 +64,7 @@ interface BracketData {
     c37: TieDisplay[];
     c38: TieDisplay[];
   };
+  liveScores?: Record<number, LiveFixtureScore[]>; // Live scores by gameweek
 }
 
 type TabType = "tvt" | "challenger";
@@ -178,14 +179,18 @@ function MatchCard({ tie, compact, liveScores }: { tie: TieDisplay; compact?: bo
   );
 }
 
-function RoundColumn({ title, ties, className, liveScores }: { title: string; ties: TieDisplay[]; className?: string; liveScores?: LiveFixtureScore[] }) {
+function RoundColumn({ title, ties, className, liveScores }: { title: string; ties: TieDisplay[]; className?: string; liveScores?: Record<number, LiveFixtureScore[]> }) {
   if (ties.length === 0) return null;
+  
+  // Flatten all live scores from all GWs into a single array for matching
+  const allLiveScores = liveScores ? Object.values(liveScores).flat() : [];
+  
   return (
     <div className={`flex flex-col gap-3 ${className || ""}`}>
       <h3 className="text-xs font-bold text-yellow-400 uppercase tracking-wider text-center">{title}</h3>
       <div className="flex flex-col gap-2 justify-around flex-1">
         {ties.map((tie) => (
-          <MatchCard key={tie.tieId} tie={tie} liveScores={liveScores} />
+          <MatchCard key={tie.tieId} tie={tie} liveScores={allLiveScores} />
         ))}
       </div>
     </div>
@@ -411,10 +416,10 @@ export default function PlayoffsPage() {
         {activeTab === "tvt" && (
           <div className="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
             <div className="grid grid-cols-4 gap-3 sm:gap-4 min-w-[700px] min-h-[600px]">
-              <RoundColumn title="Round of 16" ties={data.tvt.ro16} liveScores={liveScores} />
-              <RoundColumn title="Quarter-Finals" ties={data.tvt.qf} liveScores={liveScores} />
-              <RoundColumn title="Semi-Finals" ties={data.tvt.sf} liveScores={liveScores} />
-              <RoundColumn title="Grand Finale" ties={data.tvt.final} liveScores={liveScores} />
+              <RoundColumn title="Round of 16" ties={data.tvt.ro16} liveScores={data.liveScores} />
+              <RoundColumn title="Quarter-Finals" ties={data.tvt.qf} liveScores={data.liveScores} />
+              <RoundColumn title="Semi-Finals" ties={data.tvt.sf} liveScores={data.liveScores} />
+              <RoundColumn title="Grand Finale" ties={data.tvt.final} liveScores={data.liveScores} />
             </div>
           </div>
         )}
@@ -422,46 +427,53 @@ export default function PlayoffsPage() {
         {/* Challenger Series */}
         {activeTab === "challenger" && (
           <div className="space-y-6">
-            {[
-              { key: "c31", label: "C-31 (GW31) — Round of 12", data: data.challenger.c31 },
-              { key: "c32", label: "C-32 (GW32) — Round of 6", data: data.challenger.c32 },
-            ].map(({ key, label, data: roundTies }) => {
-              const ties = roundTies as TieDisplay[];
-              if (!ties || ties.length === 0) return null;
+            {(() => {
+              const allLiveScores = data.liveScores ? Object.values(data.liveScores).flat() : [];
               return (
-                <div key={key}>
-                  <h3 className="text-xs font-bold text-yellow-400 uppercase tracking-wider mb-2">{label}</h3>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {ties.map(tie => <MatchCard key={tie.tieId} tie={tie} compact liveScores={liveScores} />)}
-                  </div>
-                </div>
-              );
-            })}
+                <>
+                  {[
+                    { key: "c31", label: "C-31 (GW31) — Round of 12", data: data.challenger.c31 },
+                    { key: "c32", label: "C-32 (GW32) — Round of 6", data: data.challenger.c32 },
+                  ].map(({ key, label, data: roundTies }) => {
+                    const ties = roundTies as TieDisplay[];
+                    if (!ties || ties.length === 0) return null;
+                    return (
+                      <div key={key}>
+                        <h3 className="text-xs font-bold text-yellow-400 uppercase tracking-wider mb-2">{label}</h3>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                          {ties.map(tie => <MatchCard key={tie.tieId} tie={tie} compact liveScores={allLiveScores} />)}
+                        </div>
+                      </div>
+                    );
+                  })}
 
-            {/* C-33 Survival */}
-            {data.challenger.c33.length > 0 && (
-              <SurvivalTable entries={data.challenger.c33 as SurvivalDisplay[]} />
-            )}
+                  {/* C-33 Survival */}
+                  {data.challenger.c33.length > 0 && (
+                    <SurvivalTable entries={data.challenger.c33 as SurvivalDisplay[]} />
+                  )}
 
-            {/* C-34 through C-38 */}
-            {[
-              { key: "c34", label: "C-34 (GW34) — Quarter-Finals", data: data.challenger.c34 },
-              { key: "c35", label: "C-35 (GW35) — QF Losers vs C-34 Winners", data: data.challenger.c35 },
-              { key: "c36", label: "C-36 (GW36) — Round of 4", data: data.challenger.c36 },
-              { key: "c37", label: "C-37 (GW37) — Challenger Semi-Finals", data: data.challenger.c37 },
-              { key: "c38", label: "C-38 (GW38) — Challenger Final", data: data.challenger.c38 },
-            ].map(({ key, label, data: roundData }) => {
-              const ties = roundData as TieDisplay[];
-              if (!ties || ties.length === 0) return null;
-              return (
-                <div key={key}>
-                  <h3 className="text-xs font-bold text-yellow-400 uppercase tracking-wider mb-2">{label}</h3>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {ties.map(tie => <MatchCard key={tie.tieId} tie={tie} compact liveScores={liveScores} />)}
-                  </div>
-                </div>
+                  {/* C-34 through C-38 */}
+                  {[
+                    { key: "c34", label: "C-34 (GW34) — Quarter-Finals", data: data.challenger.c34 },
+                    { key: "c35", label: "C-35 (GW35) — QF Losers vs C-34 Winners", data: data.challenger.c35 },
+                    { key: "c36", label: "C-36 (GW36) — Round of 4", data: data.challenger.c36 },
+                    { key: "c37", label: "C-37 (GW37) — Challenger Semi-Finals", data: data.challenger.c37 },
+                    { key: "c38", label: "C-38 (GW38) — Challenger Final", data: data.challenger.c38 },
+                  ].map(({ key, label, data: roundData }) => {
+                    const ties = roundData as TieDisplay[];
+                    if (!ties || ties.length === 0) return null;
+                    return (
+                      <div key={key}>
+                        <h3 className="text-xs font-bold text-yellow-400 uppercase tracking-wider mb-2">{label}</h3>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                          {ties.map(tie => <MatchCard key={tie.tieId} tie={tie} compact liveScores={allLiveScores} />)}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </>
               );
-            })}
+            })()}
           </div>
         )}
       </div>
