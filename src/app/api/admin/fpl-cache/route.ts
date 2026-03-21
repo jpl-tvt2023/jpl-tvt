@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getCacheStats, clearGameweekCache, getAllCachedScores } from "@/lib/fpl-cache";
+import { getCacheStats, clearGameweekCache, getAllCachedScores, clearLiveCache } from "@/lib/fpl-cache";
 
 /**
  * GET /api/admin/fpl-cache
@@ -50,7 +50,9 @@ export async function DELETE(request: NextRequest) {
           { status: 400 }
         );
       }
+      // Clear both FPL data cache and live scores cache
       await clearGameweekCache(gw);
+      await clearLiveCache(gw);
       return NextResponse.json({
         success: true,
         message: `Cache cleared for GW${gw}`,
@@ -59,6 +61,7 @@ export async function DELETE(request: NextRequest) {
       // Clear all
       for (let gw = 1; gw <= 38; gw++) {
         await clearGameweekCache(gw);
+        await clearLiveCache(gw);
       }
       return NextResponse.json({
         success: true,

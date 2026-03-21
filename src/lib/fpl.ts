@@ -111,6 +111,8 @@ export async function fetchTeamHistory(teamId: string) {
 }
 
 import { getCachedScore, setCachedScore } from "./fpl-cache";
+import { db, gameweeks, fixtures, results } from "./db";
+import { eq, and, isNull, asc, inArray } from "drizzle-orm";
 
 /**
  * Calculate total gameweek score for an FPL team
@@ -186,4 +188,75 @@ export async function getCaptainInfo(teamId: string, gameweek: number) {
         }
       : null,
   };
+}
+
+/**
+ * Detect which gameweek is currently live (playoff GW31-38)
+ * Returns status map: {[gw]: "notStarted"|"inProgress"|"finished"}
+ * 
+ * Live GW criteria: deadline passed AND not all playoff fixtures have results
+ * This is used by bracket API to fetch from correct source:
+ * - live GW: fetch from Redis cache (populated by cron every 10 min)
+ * - finished GW: fetch from DB results table (locked by cron)
+ * - upcoming GW: return empty (scores = 0)
+ */
+export async function detectLiveGameweek(): Promise<{
+  liveGw: number | null;
+  gwStatus: Record<number, "notStarted" | "inProgress" | "finished">;
+}> {
+  const gwStatus: Record<number, "notStarted" | "inProgress" | "finished"> = {};
+  let liveGw: number | null = null;
+  const now = new Date();
+
+  try {
+    for (let gwNumber = 31; gwNumber <= 38; gwNumber++) {
+      const gwRecord = await db.query.gameweeks.findFirst({
+        where: eq(gameweeks.number, gwNumber),
+      });
+
+      if (!gwRecord) {
+        gwStatus[gwNumber] = "notStarted";
+        continue;
+      }
+
+      // Check if deadline has passed
+      if (gwRecord.deadline > now) {
+        gwStatus[gwNumber] = "notStarted";
+        continue;
+      }
+
+      // Deadline passed - check if all playoff fixtures have results
+      const playoffFixtures = await db.query.fixtures.findMany({
+        where: and(
+          eq(fixtures.gameweekId, gwRecord.id),
+          eq(fixtures.isPlayoff, true)
+        ),
+      });
+
+      if (playoffFixtures.length === 0) {
+        gwStatus[gwNumber] = "notStarted";
+        continue;
+      }
+
+      // Check which fixtures have results
+
+      const fixturesWithResults = await db
+        .select({ fixtureId: results.fixtureId })
+        .from(results)
+        .where(inArray(results.fixtureId, playoffFixtures.map((f) => f.id)));
+
+      const allHaveResults = playoffFixtures.length === fixturesWithResults.length;
+
+      if (allHaveResults) {
+        gwStatus[gwNumber] = "finished";
+      } else {
+        gwStatus[gwNumber] = "inProgress";
+        liveGw = gwNumber; // Only one should be in-progress at a time
+      }
+    }
+  } catch (error) {
+    console.error("Error detecting live gameweek:", error);
+  }
+
+  return { liveGw, gwStatus };
 }
