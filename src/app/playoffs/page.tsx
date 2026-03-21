@@ -5,15 +5,15 @@ import Link from "next/link";
 
 interface LiveFixtureScore {
   fixtureId: string;
-  gameweek: number;          // Track which GW this score is from (to distinguish leg1 from leg2)
+  gameweek: number;
   homeTeamName: string;
   awayTeamName: string;
   homeTeamAbbr: string;
   awayTeamAbbr: string;
   homeScore: number;
   awayScore: number;
-  homePlayers: { name: string; fplScore: number; transferHits: number; isCaptain: boolean; finalScore: number }[];
-  awayPlayers: { name: string; fplScore: number; transferHits: number; isCaptain: boolean; finalScore: number }[];
+  homePlayers: { name: string; fplId: string; fplScore: number; transferHits: number; isCaptain: boolean; finalScore: number }[];
+  awayPlayers: { name: string; fplId: string; fplScore: number; transferHits: number; isCaptain: boolean; finalScore: number }[];
 }
 
 interface TeamSide {
@@ -70,23 +70,62 @@ interface BracketData {
 
 type TabType = "tvt" | "challenger";
 
+function PlayerBreakdown({ 
+  label, 
+  players, 
+  gameweek 
+}: { 
+  label: string; 
+  players: { name: string; fplId: string; fplScore: number; transferHits: number; isCaptain: boolean; finalScore: number }[];
+  gameweek: number;
+}) {
+  if (players.length === 0) return null;
+  return (
+    <div>
+      <div className="text-[10px] text-gray-400 mb-1 text-center">{label}</div>
+      {players.map((p, i) => (
+        <div key={i} className="flex items-center justify-between py-0.5 text-xs">
+          <div className="flex items-center gap-1">
+            <a
+              href={`https://fantasy.premierleague.com/entry/${p.fplId}/event/${gameweek}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-400 hover:text-blue-300 underline"
+            >
+              {p.name}
+            </a>
+            {p.isCaptain && (
+              <span className="px-1 py-0.5 rounded text-[9px] font-bold bg-yellow-500/20 text-yellow-400">C</span>
+            )}
+          </div>
+          <div className="text-right">
+            {p.isCaptain ? (
+              <span className="text-yellow-400 font-semibold">
+                {p.fplScore}{p.transferHits > 0 ? ` - ${p.transferHits}` : ""} × 2 = {p.finalScore}
+              </span>
+            ) : (
+              <span className="text-white">{p.finalScore}{p.transferHits > 0 ? ` (−${p.transferHits})` : ""}</span>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function MatchCard({ 
   tie, 
   compact, 
   liveScores,
-  isRefreshing,
-  onRefresh
 }: { 
   tie: TieDisplay; 
   compact?: boolean; 
   liveScores?: LiveFixtureScore[];
-  isRefreshing?: boolean;
-  onRefresh?: (gw: number, fixtureId: string) => void;
 }) {
+  const [expanded, setExpanded] = useState(false);
   const is2Leg = tie.gw2 !== null;
   const isPlaceholder = (side: TeamSide | null) => !side?.teamId;
 
-  // NEW: Get live score for a specific gameweek (leg) to distinguish leg1 from leg2
   const getLiveScoreForGW = (gwNumber: number): LiveFixtureScore | undefined => {
     if (!liveScores || !tie.home?.abbr || !tie.away?.abbr) return undefined;
     return liveScores.find((l) => {
@@ -100,14 +139,15 @@ function MatchCard({
     });
   };
 
-  // Get live scores for leg1 and leg2 (if 2-leg tie)
   const liveScoreLeg1 = getLiveScoreForGW(tie.gw1);
   const liveScoreLeg2 = is2Leg ? getLiveScoreForGW(tie.gw2!) : undefined;
 
-  // Show live if fresh data exists (overrides stale DB data)
-  const showLiveLeg1 = !!liveScoreLeg1;  // Fresh GW1 data exists
-  const showLiveLeg2 = !!liveScoreLeg2;  // Fresh GW2 data exists
-  const showLive = showLiveLeg1 || showLiveLeg2;  // Any leg is live
+  const showLiveLeg1 = !!liveScoreLeg1;
+  const showLiveLeg2 = !!liveScoreLeg2;
+  const showLive = showLiveLeg1 || showLiveLeg2;
+
+  // Check if bifurcation data exists for any leg
+  const hasPlayerData = (liveScoreLeg1?.homePlayers?.length ?? 0) > 0 || (liveScoreLeg2?.homePlayers?.length ?? 0) > 0;
 
   const teamLabel = (side: TeamSide | null) => {
     if (!side) return "TBD";
@@ -120,7 +160,6 @@ function MatchCard({
     return "text-white";
   };
 
-  // Helper to extract score for a specific team from live fixture data
   const getLiveScore = (side: TeamSide | null, liveFixture: LiveFixtureScore | undefined): number | null => {
     if (!liveFixture || !side?.abbr) return null;
     if (liveFixture.homeTeamAbbr === side.abbr) return liveFixture.homeScore;
@@ -128,28 +167,32 @@ function MatchCard({
     return null;
   };
 
+  // Get players for a given side (home/away in the TIE) from a live fixture
+  const getPlayersForSide = (side: TeamSide | null, liveFixture: LiveFixtureScore | undefined) => {
+    if (!liveFixture || !side?.abbr) return [];
+    if (liveFixture.homeTeamAbbr === side.abbr) return liveFixture.homePlayers;
+    if (liveFixture.awayTeamAbbr === side.abbr) return liveFixture.awayPlayers;
+    return [];
+  };
+
   return (
-    <div className={`bg-slate-800/80 border rounded-lg ${compact ? "p-2" : "p-3"} text-sm ${
-      (showLive || showLiveLeg2) ? "border-green-500/30" : "border-white/10"
-    }`}>
+    <div 
+      className={`bg-slate-800/80 border rounded-lg ${compact ? "p-2" : "p-3"} text-sm ${
+        showLive ? "border-green-500/30" : "border-white/10"
+      } ${hasPlayerData ? "cursor-pointer hover:bg-slate-700/80 transition-colors" : ""}`}
+      onClick={hasPlayerData ? () => setExpanded(!expanded) : undefined}
+    >
       <div className="flex items-center justify-between text-[10px] text-gray-500 uppercase tracking-wide mb-1">
         <span>{tie.tieId} {is2Leg ? `(GW${tie.gw1}+${tie.gw2})` : `(GW${tie.gw1})`}</span>
         <div className="flex items-center gap-2">
-          {(showLive || showLiveLeg2) && (
+          {showLive && (
             <span className="text-green-400 flex items-center gap-1 normal-case">
               <span className="h-1.5 w-1.5 rounded-full bg-green-400 animate-pulse"></span>
               LIVE
             </span>
           )}
-          {(showLive || showLiveLeg2) && onRefresh && (
-            <button
-              onClick={() => onRefresh(tie.gw1, tie.tieId)}
-              disabled={isRefreshing}
-              className="text-green-400 hover:text-green-300 disabled:opacity-50 transition-opacity"
-              title="Refresh live scores"
-            >
-              {isRefreshing ? "⟳" : "⟳"}
-            </button>
+          {hasPlayerData && (
+            <span className="text-gray-500 text-[10px]">{expanded ? "▲" : "▼"}</span>
           )}
         </div>
       </div>
@@ -160,15 +203,12 @@ function MatchCard({
         {!isPlaceholder(tie.home) && (
           is2Leg ? (
             <div className="flex gap-2 text-xs tabular-nums">
-              {/* LEG 1: Show fresh live score if available, else DB value */}
               <span className={`w-5 text-center ${showLiveLeg1 ? "text-green-400" : ""}`}>
                 {showLiveLeg1 ? getLiveScore(tie.home, liveScoreLeg1) ?? "–" : (tie.home?.leg1Score ?? "–")}
               </span>
-              {/* LEG 2: Show fresh live score if available, else DB value */}
               <span className={`w-5 text-center ${showLiveLeg2 ? "text-green-400" : ""}`}>
                 {showLiveLeg2 ? getLiveScore(tie.home, liveScoreLeg2) ?? "–" : (tie.home?.leg2Score ?? "–")}
               </span>
-              {/* AGGREGATE: Recalculate using live values when available */}
               <span className="w-6 text-center font-bold border-l border-white/20 pl-1">
                 {(() => {
                   const leg1Val = showLiveLeg1 ? (getLiveScore(tie.home, liveScoreLeg1) ?? 0) : (tie.home?.leg1Score ?? 0);
@@ -191,15 +231,12 @@ function MatchCard({
         {!isPlaceholder(tie.away) && (
           is2Leg ? (
             <div className="flex gap-2 text-xs tabular-nums">
-              {/* LEG 1: Show fresh live score if available, else DB value */}
               <span className={`w-5 text-center ${showLiveLeg1 ? "text-green-400" : ""}`}>
                 {showLiveLeg1 ? getLiveScore(tie.away, liveScoreLeg1) ?? "–" : (tie.away?.leg1Score ?? "–")}
               </span>
-              {/* LEG 2: Show fresh live score if available, else DB value */}
               <span className={`w-5 text-center ${showLiveLeg2 ? "text-green-400" : ""}`}>
                 {showLiveLeg2 ? getLiveScore(tie.away, liveScoreLeg2) ?? "–" : (tie.away?.leg2Score ?? "–")}
               </span>
-              {/* AGGREGATE: Recalculate using live values when available */}
               <span className="w-6 text-center font-bold border-l border-white/20 pl-1">
                 {(() => {
                   const leg1Val = showLiveLeg1 ? (getLiveScore(tie.away, liveScoreLeg1) ?? 0) : (tie.away?.leg1Score ?? 0);
@@ -223,6 +260,48 @@ function MatchCard({
           <span className="w-6 text-center pl-1">Agg</span>
         </div>
       )}
+
+      {/* Expandable Player Bifurcation */}
+      {expanded && hasPlayerData && (
+        <div className="mt-2 pt-2 border-t border-white/10" onClick={(e) => e.stopPropagation()}>
+          {/* Leg 1 bifurcation */}
+          {showLiveLeg1 && liveScoreLeg1 && (liveScoreLeg1.homePlayers?.length ?? 0) > 0 && (
+            <div>
+              {is2Leg && <div className="text-[10px] text-gray-500 font-semibold mb-1">Leg 1 (GW{tie.gw1})</div>}
+              <div className="grid grid-cols-2 gap-2">
+                <PlayerBreakdown
+                  label={`${tie.home?.abbr || "Home"} Players`}
+                  players={getPlayersForSide(tie.home, liveScoreLeg1)}
+                  gameweek={tie.gw1}
+                />
+                <PlayerBreakdown
+                  label={`${tie.away?.abbr || "Away"} Players`}
+                  players={getPlayersForSide(tie.away, liveScoreLeg1)}
+                  gameweek={tie.gw1}
+                />
+              </div>
+            </div>
+          )}
+          {/* Leg 2 bifurcation */}
+          {showLiveLeg2 && liveScoreLeg2 && (liveScoreLeg2.homePlayers?.length ?? 0) > 0 && (
+            <div className={showLiveLeg1 ? "mt-2" : ""}>
+              <div className="text-[10px] text-gray-500 font-semibold mb-1">Leg 2 (GW{tie.gw2})</div>
+              <div className="grid grid-cols-2 gap-2">
+                <PlayerBreakdown
+                  label={`${tie.home?.abbr || "Home"} Players`}
+                  players={getPlayersForSide(tie.home, liveScoreLeg2)}
+                  gameweek={tie.gw2!}
+                />
+                <PlayerBreakdown
+                  label={`${tie.away?.abbr || "Away"} Players`}
+                  players={getPlayersForSide(tie.away, liveScoreLeg2)}
+                  gameweek={tie.gw2!}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -232,17 +311,17 @@ function RoundColumn({
   ties, 
   className, 
   liveScores,
-  refreshing,
+  refreshingGw,
   tempLiveScores,
-  onRefresh
+  onRefreshRound
 }: { 
   title: string; 
   ties: TieDisplay[]; 
   className?: string; 
   liveScores?: Record<number, LiveFixtureScore[]>;
-  refreshing?: string | null;
+  refreshingGw?: number | null;
   tempLiveScores?: Record<number, LiveFixtureScore[]>;
-  onRefresh?: (gw: number, fixtureId: string) => void;
+  onRefreshRound?: (gw: number) => void;
 }) {
   if (ties.length === 0) return null;
   
@@ -250,18 +329,33 @@ function RoundColumn({
   const tempScores = tempLiveScores ? Object.values(tempLiveScores).flat() : [];
   const cachedScores = liveScores ? Object.values(liveScores).flat() : [];
   const mergedScores = [...tempScores, ...cachedScores];
+
+  // Determine the GW for this round (from the first tie)
+  const roundGw = ties[0].gw1;
+  const hasLiveData = mergedScores.some(s => s.gameweek === roundGw);
+  const isRefreshing = refreshingGw === roundGw;
   
   return (
     <div className={`flex flex-col gap-3 ${className || ""}`}>
-      <h3 className="text-xs font-bold text-yellow-400 uppercase tracking-wider text-center">{title}</h3>
+      <div className="flex items-center justify-center gap-2">
+        <h3 className="text-xs font-bold text-yellow-400 uppercase tracking-wider text-center">{title}</h3>
+        {hasLiveData && onRefreshRound && (
+          <button
+            onClick={() => onRefreshRound(roundGw)}
+            disabled={isRefreshing}
+            className={`text-green-400 hover:text-green-300 disabled:opacity-50 transition-all text-sm ${isRefreshing ? "animate-spin" : ""}`}
+            title="Refresh live scores"
+          >
+            ⟳
+          </button>
+        )}
+      </div>
       <div className="flex flex-col gap-2 justify-around flex-1">
         {ties.map((tie) => (
           <MatchCard 
             key={tie.tieId} 
             tie={tie} 
             liveScores={mergedScores}
-            isRefreshing={refreshing === tie.tieId}
-            onRefresh={onRefresh}
           />
         ))}
       </div>
@@ -319,7 +413,7 @@ export default function PlayoffsPage() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [liveScores, setLiveScores] = useState<LiveFixtureScore[]>([]);
-  const [refreshing, setRefreshing] = useState<string | null>(null);  // fixtureId being refreshed
+  const [refreshing, setRefreshing] = useState<number | null>(null);  // GW number being refreshed
   const [tempLiveScores, setTempLiveScores] = useState<Record<number, LiveFixtureScore[]>>({});  // Temp fresh scores
 
   const fetchLiveScores = useCallback(async (latestGw: number) => {
@@ -381,13 +475,12 @@ export default function PlayoffsPage() {
     window.location.href = "/signin";
   };
 
-  const handleRefreshMatch = async (gwNumber: number, fixtureId: string) => {
-    setRefreshing(fixtureId);
+  const handleRefreshRound = async (gwNumber: number) => {
+    setRefreshing(gwNumber);
     try {
       const res = await fetch(`/api/fixtures/live/refresh?gameweek=${gwNumber}`);
       if (res.ok) {
         const freshData = await res.json();
-        // Store temp fresh scores for this GW
         setTempLiveScores(prev => ({
           ...prev,
           [gwNumber]: freshData.fixtures || []
@@ -496,33 +589,33 @@ export default function PlayoffsPage() {
                 title="Round of 16" 
                 ties={data.tvt.ro16} 
                 liveScores={data.liveScores}
-                refreshing={refreshing}
+                refreshingGw={refreshing}
                 tempLiveScores={tempLiveScores}
-                onRefresh={handleRefreshMatch}
+                onRefreshRound={handleRefreshRound}
               />
               <RoundColumn 
                 title="Quarter-Finals" 
                 ties={data.tvt.qf} 
                 liveScores={data.liveScores}
-                refreshing={refreshing}
+                refreshingGw={refreshing}
                 tempLiveScores={tempLiveScores}
-                onRefresh={handleRefreshMatch}
+                onRefreshRound={handleRefreshRound}
               />
               <RoundColumn 
                 title="Semi-Finals" 
                 ties={data.tvt.sf} 
                 liveScores={data.liveScores}
-                refreshing={refreshing}
+                refreshingGw={refreshing}
                 tempLiveScores={tempLiveScores}
-                onRefresh={handleRefreshMatch}
+                onRefreshRound={handleRefreshRound}
               />
               <RoundColumn 
                 title="Grand Finale" 
                 ties={data.tvt.final} 
                 liveScores={data.liveScores}
-                refreshing={refreshing}
+                refreshingGw={refreshing}
                 tempLiveScores={tempLiveScores}
-                onRefresh={handleRefreshMatch}
+                onRefreshRound={handleRefreshRound}
               />
             </div>
           </div>
@@ -538,14 +631,28 @@ export default function PlayoffsPage() {
               return (
                 <>
                   {[
-                    { key: "c31", label: "C-31 (GW31) — Round of 12", data: data.challenger.c31 },
-                    { key: "c32", label: "C-32 (GW32) — Round of 6", data: data.challenger.c32 },
-                  ].map(({ key, label, data: roundTies }) => {
+                    { key: "c31", label: "C-31 (GW31) — Round of 12", gw: 31, data: data.challenger.c31 },
+                    { key: "c32", label: "C-32 (GW32) — Round of 6", gw: 32, data: data.challenger.c32 },
+                  ].map(({ key, label, gw, data: roundTies }) => {
                     const ties = roundTies as TieDisplay[];
                     if (!ties || ties.length === 0) return null;
+                    const hasLive = mergedScores.some(s => s.gameweek === gw);
+                    const isRoundRefreshing = refreshing === gw;
                     return (
                       <div key={key}>
-                        <h3 className="text-xs font-bold text-yellow-400 uppercase tracking-wider mb-2">{label}</h3>
+                        <div className="flex items-center gap-2 mb-2">
+                          <h3 className="text-xs font-bold text-yellow-400 uppercase tracking-wider">{label}</h3>
+                          {hasLive && (
+                            <button
+                              onClick={() => handleRefreshRound(gw)}
+                              disabled={isRoundRefreshing}
+                              className={`text-green-400 hover:text-green-300 disabled:opacity-50 transition-all text-sm ${isRoundRefreshing ? "animate-spin" : ""}`}
+                              title="Refresh live scores"
+                            >
+                              ⟳
+                            </button>
+                          )}
+                        </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                           {ties.map(tie => (
                             <MatchCard 
@@ -553,8 +660,6 @@ export default function PlayoffsPage() {
                               tie={tie} 
                               compact 
                               liveScores={mergedScores}
-                              isRefreshing={refreshing === tie.tieId}
-                              onRefresh={handleRefreshMatch}
                             />
                           ))}
                         </div>
@@ -569,17 +674,31 @@ export default function PlayoffsPage() {
 
                   {/* C-34 through C-38 */}
                   {[
-                    { key: "c34", label: "C-34 (GW34) — Quarter-Finals", data: data.challenger.c34 },
-                    { key: "c35", label: "C-35 (GW35) — QF Losers vs C-34 Winners", data: data.challenger.c35 },
-                    { key: "c36", label: "C-36 (GW36) — Round of 4", data: data.challenger.c36 },
-                    { key: "c37", label: "C-37 (GW37) — Challenger Semi-Finals", data: data.challenger.c37 },
-                    { key: "c38", label: "C-38 (GW38) — Challenger Final", data: data.challenger.c38 },
-                  ].map(({ key, label, data: roundData }) => {
+                    { key: "c34", label: "C-34 (GW34) — Quarter-Finals", gw: 34, data: data.challenger.c34 },
+                    { key: "c35", label: "C-35 (GW35) — QF Losers vs C-34 Winners", gw: 35, data: data.challenger.c35 },
+                    { key: "c36", label: "C-36 (GW36) — Round of 4", gw: 36, data: data.challenger.c36 },
+                    { key: "c37", label: "C-37 (GW37) — Challenger Semi-Finals", gw: 37, data: data.challenger.c37 },
+                    { key: "c38", label: "C-38 (GW38) — Challenger Final", gw: 38, data: data.challenger.c38 },
+                  ].map(({ key, label, gw, data: roundData }) => {
                     const ties = roundData as TieDisplay[];
                     if (!ties || ties.length === 0) return null;
+                    const hasLive = mergedScores.some(s => s.gameweek === gw);
+                    const isRoundRefreshing = refreshing === gw;
                     return (
                       <div key={key}>
-                        <h3 className="text-xs font-bold text-yellow-400 uppercase tracking-wider mb-2">{label}</h3>
+                        <div className="flex items-center gap-2 mb-2">
+                          <h3 className="text-xs font-bold text-yellow-400 uppercase tracking-wider">{label}</h3>
+                          {hasLive && (
+                            <button
+                              onClick={() => handleRefreshRound(gw)}
+                              disabled={isRoundRefreshing}
+                              className={`text-green-400 hover:text-green-300 disabled:opacity-50 transition-all text-sm ${isRoundRefreshing ? "animate-spin" : ""}`}
+                              title="Refresh live scores"
+                            >
+                              ⟳
+                            </button>
+                          )}
+                        </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                           {ties.map(tie => (
                             <MatchCard 
@@ -587,8 +706,6 @@ export default function PlayoffsPage() {
                               tie={tie} 
                               compact 
                               liveScores={mergedScores}
-                              isRefreshing={refreshing === tie.tieId}
-                              onRefresh={handleRefreshMatch}
                             />
                           ))}
                         </div>
