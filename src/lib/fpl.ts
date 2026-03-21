@@ -7,7 +7,7 @@ const FPL_TIMEOUT_MS = 10000;
 function fplFetch(url: string): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FPL_TIMEOUT_MS);
-  return fetch(url, { signal: controller.signal }).finally(() => clearTimeout(timer));
+  return fetch(url, { signal: controller.signal, cache: 'no-store' }).finally(() => clearTimeout(timer));
 }
 
 export interface FPLPlayer {

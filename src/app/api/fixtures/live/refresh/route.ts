@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { fixtures, gameweeks, gameweekCaptains } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-import { fetchTeamGameweekPicks } from "@/lib/fpl";
+import { fetchTeamGameweekPicks, fetchLiveGameweek } from "@/lib/fpl";
 import type { LiveFixtureScore, LiveGameweekData } from "@/lib/fpl-cache";
 
 /**
@@ -114,7 +114,7 @@ export async function GET(request: NextRequest) {
 }
 
 /**
- * Calculate live score for a TVT team (2 FPL players + captaincy doubling)
+ * Calculate live score for a TVT team (2 FPL teams + captaincy doubling)
  */
 async function calculateLiveTeamScore(
   teamPlayers: { id: string; name: string; fplId: string }[],
@@ -124,21 +124,65 @@ async function calculateLiveTeamScore(
   total: number;
   players: { name: string; fplScore: number; transferHits: number; isCaptain: boolean; finalScore: number }[];
 }> {
+  // Fetch live gameweek data once (reused for all players)
+  const liveData = await fetchLiveGameweek(gameweek);
+  const liveElementsMap = new Map(liveData.elements.map((e) => [e.id, e]));
+
   const playerScores = [];
   let total = 0;
 
   for (const player of teamPlayers) {
     try {
+      // Fetch picks for this FPL team to see which 15 FPL players they own
       const picks = await fetchTeamGameweekPicks(player.fplId, gameweek);
-      const fplScore = picks.entry_history.points;
+      
+      // Get transfer cost
       const transferHits = picks.entry_history.event_transfers_cost;
-      const netScore = fplScore - transferHits;
+      
+      // Determine effective multipliers with proper VC activation
+      // FPL multiplier values: 0 = bench, 1 = starting, 2 = captain, 3 = triple captain
+      const captainPick = picks.picks.find((p) => p.is_captain);
+      const viceCaptainPick = picks.picks.find((p) => p.is_vice_captain);
+      
+      // Check if captain actually played (has minutes > 0)
+      const captainLive = captainPick ? liveElementsMap.get(captainPick.element) : null;
+      const captainPlayed = captainLive ? captainLive.stats.minutes > 0 : false;
+      
+      // Calculate total from live FPL player scores using multiplier
+      let teamScore = 0;
+      
+      for (const pick of picks.picks) {
+        const liveElement = liveElementsMap.get(pick.element);
+        if (!liveElement) continue;
+        
+        let multiplier = pick.multiplier;
+        
+        // Handle VC activation: if captain didn't play, VC gets captain's multiplier
+        if (!captainPlayed) {
+          if (pick.is_captain) {
+            multiplier = 0; // Captain didn't play, gets 0
+          } else if (pick.is_vice_captain) {
+            // VC inherits captain multiplier (2 normally, 3 for triple captain)
+            multiplier = captainPick?.multiplier ?? 2;
+          }
+        }
+        
+        // Only count players with multiplier > 0 (excludes bench unless bench boost)
+        if (multiplier > 0) {
+          teamScore += liveElement.stats.total_points * multiplier;
+        }
+      }
+      
+      // Deduct transfer hits
+      const netScore = teamScore - transferHits;
+      
+      // Apply TVT captain doubling (separate from FPL captaincy)
       const isCaptain = captainPlayerId === player.id;
       const finalScore = isCaptain ? netScore * 2 : netScore;
 
       playerScores.push({
         name: player.name,
-        fplScore,
+        fplScore: netScore, // Net FPL score after transfer hits
         transferHits,
         isCaptain,
         finalScore,
@@ -146,7 +190,7 @@ async function calculateLiveTeamScore(
 
       total += finalScore;
     } catch (err) {
-      console.error(`Failed to fetch FPL data for player ${player.fplId} in GW${gameweek}:`, err);
+      console.error(`Failed to fetch live FPL data for team ${player.fplId} in GW${gameweek}:`, err);
       playerScores.push({
         name: player.name,
         fplScore: 0,
