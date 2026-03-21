@@ -244,6 +244,13 @@ export default function DashboardPage() {
   const [submitMessage, setSubmitMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [showOpponentPlayers, setShowOpponentPlayers] = useState(false);
   const [showAllCaptains, setShowAllCaptains] = useState(false);
+  const [liveRefreshing, setLiveRefreshing] = useState(false);
+  const [liveScoreOverride, setLiveScoreOverride] = useState<{
+    myScore: number;
+    oppScore: number;
+    myPlayerScores: { name: string; fplId: string; fplScore: number; transferHits: number; isCaptain: boolean; finalScore: number }[];
+    oppPlayerScores: { name: string; fplId: string; fplScore: number; transferHits: number; isCaptain: boolean; finalScore: number }[];
+  } | null>(null);
 
   const fetchDashboard = useCallback(async (gw?: number) => {
     try {
@@ -274,12 +281,47 @@ export default function DashboardPage() {
   // GW navigation handlers
   const handlePrevGw = () => {
     if (data && viewedGw && data.minCompletedGw && viewedGw > data.minCompletedGw) {
+      setLiveScoreOverride(null);
       fetchDashboard(viewedGw - 1);
     }
   };
   const handleNextGw = () => {
     if (data && viewedGw && data.maxCompletedGw && viewedGw < data.maxCompletedGw) {
+      setLiveScoreOverride(null);
       fetchDashboard(viewedGw + 1);
+    }
+  };
+
+  const handleLiveRefresh = async () => {
+    if (!data || !viewedGw) return;
+    setLiveRefreshing(true);
+    try {
+      const res = await fetch(`/api/fixtures/live/refresh?gameweek=${viewedGw}`);
+      if (res.ok) {
+        const freshData = await res.json();
+        // Find the fixture matching this user's team
+        const myAbbr = data.lastGwResult?.myTeamAbbr;
+        const oppAbbr = data.lastGwResult?.opponentAbbr;
+        if (myAbbr && oppAbbr && freshData.fixtures) {
+          const fixture = freshData.fixtures.find((f: { homeTeamAbbr: string; awayTeamAbbr: string }) =>
+            (f.homeTeamAbbr === myAbbr && f.awayTeamAbbr === oppAbbr) ||
+            (f.homeTeamAbbr === oppAbbr && f.awayTeamAbbr === myAbbr)
+          );
+          if (fixture) {
+            const isMyHome = fixture.homeTeamAbbr === myAbbr;
+            setLiveScoreOverride({
+              myScore: isMyHome ? fixture.homeScore : fixture.awayScore,
+              oppScore: isMyHome ? fixture.awayScore : fixture.homeScore,
+              myPlayerScores: isMyHome ? fixture.homePlayers : fixture.awayPlayers,
+              oppPlayerScores: isMyHome ? fixture.awayPlayers : fixture.homePlayers,
+            });
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Live refresh failed:", err);
+    } finally {
+      setLiveRefreshing(false);
     }
   };
 
@@ -698,6 +740,14 @@ export default function DashboardPage() {
                   </button>
                   <h2 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
                     <span className="text-yellow-400">📊</span> GW{data.lastGwResult.gameweek} Result
+                    <button
+                      onClick={handleLiveRefresh}
+                      disabled={liveRefreshing}
+                      className={`text-green-400 hover:text-green-300 disabled:opacity-50 transition-all text-sm ${liveRefreshing ? "animate-spin" : ""}`}
+                      title="Refresh live scores"
+                    >
+                      ⟳
+                    </button>
                   </h2>
                   <button
                     onClick={handleNextGw}
@@ -716,27 +766,39 @@ export default function DashboardPage() {
                     <div className="text-base sm:text-lg font-bold text-white">{data.lastGwResult.myTeamName}</div>
                   </div>
                   <div className="px-4 sm:px-6 text-center">
-                    <div className={`text-3xl sm:text-4xl font-bold ${
-                      data.lastGwResult.result === "W" ? "text-green-400" :
-                      data.lastGwResult.result === "L" ? "text-red-400" : "text-gray-400"
-                    }`}>
-                      {data.lastGwResult.myScore} - {data.lastGwResult.oppScore}
-                    </div>
-                    <div className="flex items-center justify-center gap-2 mt-2">
-                      <span className={`px-2 py-0.5 rounded text-xs font-semibold ${
-                        data.lastGwResult.result === "W" ? "bg-green-500/20 text-green-400" :
-                        data.lastGwResult.result === "L" ? "bg-red-500/20 text-red-400" : "bg-gray-500/20 text-gray-400"
-                      }`}>
-                        {data.lastGwResult.gameweek <= 30
-                          ? (data.lastGwResult.result === "W" ? "WIN +2" : data.lastGwResult.result === "D" ? "DRAW +1" : "LOSS +0")
-                          : (data.lastGwResult.result === "W" ? "WIN" : data.lastGwResult.result === "D" ? "DRAW" : "LOSS")}
-                      </span>
-                      {data.lastGwResult.gotBonus && (
-                        <span className="px-2 py-0.5 rounded text-xs font-semibold bg-yellow-500/20 text-yellow-400">
-                          BONUS +1
-                        </span>
-                      )}
-                    </div>
+                    {(() => {
+                      const myScore = liveScoreOverride?.myScore ?? data.lastGwResult.myScore;
+                      const oppScore = liveScoreOverride?.oppScore ?? data.lastGwResult.oppScore;
+                      const isLive = !!liveScoreOverride;
+                      const result = myScore > oppScore ? "W" : myScore < oppScore ? "L" : "D";
+                      return (
+                        <>
+                          <div className={`text-3xl sm:text-4xl font-bold ${
+                            isLive ? "text-green-400" :
+                            data.lastGwResult.result === "W" ? "text-green-400" :
+                            data.lastGwResult.result === "L" ? "text-red-400" : "text-gray-400"
+                          }`}>
+                            {myScore} - {oppScore}
+                            {isLive && <span className="ml-2 text-xs align-top text-green-400 animate-pulse">LIVE</span>}
+                          </div>
+                          <div className="flex items-center justify-center gap-2 mt-2">
+                            <span className={`px-2 py-0.5 rounded text-xs font-semibold ${
+                              (isLive ? result : data.lastGwResult.result) === "W" ? "bg-green-500/20 text-green-400" :
+                              (isLive ? result : data.lastGwResult.result) === "L" ? "bg-red-500/20 text-red-400" : "bg-gray-500/20 text-gray-400"
+                            }`}>
+                              {data.lastGwResult.gameweek <= 30
+                                ? ((isLive ? result : data.lastGwResult.result) === "W" ? "WIN +2" : (isLive ? result : data.lastGwResult.result) === "D" ? "DRAW +1" : "LOSS +0")
+                                : ((isLive ? result : data.lastGwResult.result) === "W" ? "WIN" : (isLive ? result : data.lastGwResult.result) === "D" ? "DRAW" : "LOSS")}
+                            </span>
+                            {data.lastGwResult.gotBonus && !isLive && (
+                              <span className="px-2 py-0.5 rounded text-xs font-semibold bg-yellow-500/20 text-yellow-400">
+                                BONUS +1
+                              </span>
+                            )}
+                          </div>
+                        </>
+                      );
+                    })()}
                   </div>
                   <div className="flex-1 text-center">
                     <div className="text-xs text-gray-400 mb-1">{data.lastGwResult.isHome ? "AWAY" : "HOME"}</div>
@@ -747,19 +809,20 @@ export default function DashboardPage() {
                 {/* Player Scores */}
                 <div className="grid md:grid-cols-2 gap-4">
                   {/* My Team Players */}
-                  <div className="p-3 rounded-lg bg-white/5">
+                  <div className={`p-3 rounded-lg ${liveScoreOverride ? "bg-green-900/10 border border-green-500/20" : "bg-white/5"}`}>
                     <div className="text-xs text-gray-400 mb-2 text-center">
                       {data.lastGwResult.myTeamAbbr} Players
-                      {!data.lastGwResult.hasMyCaptainData && (
+                      {!liveScoreOverride && !data.lastGwResult.hasMyCaptainData && (
                         <span className="text-orange-400 ml-1">(estimated)</span>
                       )}
+                      {liveScoreOverride && <span className="text-green-400 ml-1">(live)</span>}
                     </div>
-                    {data.lastGwResult.myPlayerScores.map((p, i) => (
+                    {(liveScoreOverride?.myPlayerScores ?? data.lastGwResult.myPlayerScores).map((p, i) => (
                       <div key={i} className="flex items-center justify-between py-1">
                         <div className="flex items-center gap-2">
-                          {p.fplUrl ? (
+                          {(('fplUrl' in p && p.fplUrl) || ('fplId' in p && p.fplId)) ? (
                             <a
-                              href={p.fplUrl}
+                              href={'fplUrl' in p && p.fplUrl ? p.fplUrl : `https://fantasy.premierleague.com/entry/${'fplId' in p ? p.fplId : ''}/event/${data.lastGwResult!.gameweek}`}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="text-blue-400 hover:text-blue-300 underline"
@@ -770,18 +833,18 @@ export default function DashboardPage() {
                             <span className="text-white">{p.name}</span>
                           )}
                           {p.isCaptain && (
-                            <span className={`px-1.5 py-0.5 rounded text-xs font-bold ${p.isInferred ? "bg-orange-500/20 text-orange-400" : "bg-yellow-500/20 text-yellow-400"}`}>
-                              C{p.isInferred ? "?" : ""}
+                            <span className={`px-1.5 py-0.5 rounded text-xs font-bold ${'isInferred' in p && p.isInferred ? "bg-orange-500/20 text-orange-400" : "bg-yellow-500/20 text-yellow-400"}`}>
+                              C{'isInferred' in p && p.isInferred ? "?" : ""}
                             </span>
                           )}
                         </div>
                         <div className="text-right">
                           {p.isCaptain ? (
-                            <span className={p.isInferred ? "text-orange-400 font-semibold" : "text-yellow-400 font-semibold"}>
+                            <span className={`${'isInferred' in p && p.isInferred ? "text-orange-400" : "text-yellow-400"} font-semibold`}>
                               {p.fplScore}{p.transferHits > 0 ? ` - ${p.transferHits}` : ""} × 2 = {p.finalScore}
                             </span>
                           ) : (
-                            <span className="text-white">{p.finalScore}</span>
+                            <span className={liveScoreOverride ? "text-green-300" : "text-white"}>{p.finalScore}{p.transferHits > 0 ? ` (−${p.transferHits})` : ""}</span>
                           )}
                         </div>
                       </div>
@@ -789,19 +852,20 @@ export default function DashboardPage() {
                   </div>
                   
                   {/* Opponent Players */}
-                  <div className="p-3 rounded-lg bg-white/5">
+                  <div className={`p-3 rounded-lg ${liveScoreOverride ? "bg-green-900/10 border border-green-500/20" : "bg-white/5"}`}>
                     <div className="text-xs text-gray-400 mb-2 text-center">
                       {data.lastGwResult.opponentAbbr} Players
-                      {!data.lastGwResult.hasOppCaptainData && (
+                      {!liveScoreOverride && !data.lastGwResult.hasOppCaptainData && (
                         <span className="text-orange-400 ml-1">(estimated)</span>
                       )}
+                      {liveScoreOverride && <span className="text-green-400 ml-1">(live)</span>}
                     </div>
-                    {data.lastGwResult.oppPlayerScores.map((p, i) => (
+                    {(liveScoreOverride?.oppPlayerScores ?? data.lastGwResult.oppPlayerScores).map((p, i) => (
                       <div key={i} className="flex items-center justify-between py-1">
                         <div className="flex items-center gap-2">
-                          {p.fplUrl ? (
+                          {(('fplUrl' in p && p.fplUrl) || ('fplId' in p && p.fplId)) ? (
                             <a
-                              href={p.fplUrl}
+                              href={'fplUrl' in p && p.fplUrl ? p.fplUrl : `https://fantasy.premierleague.com/entry/${'fplId' in p ? p.fplId : ''}/event/${data.lastGwResult!.gameweek}`}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="text-blue-400 hover:text-blue-300 underline"
@@ -812,18 +876,18 @@ export default function DashboardPage() {
                             <span className="text-white">{p.name}</span>
                           )}
                           {p.isCaptain && (
-                            <span className={`px-1.5 py-0.5 rounded text-xs font-bold ${p.isInferred ? "bg-orange-500/20 text-orange-400" : "bg-yellow-500/20 text-yellow-400"}`}>
-                              C{p.isInferred ? "?" : ""}
+                            <span className={`px-1.5 py-0.5 rounded text-xs font-bold ${'isInferred' in p && p.isInferred ? "bg-orange-500/20 text-orange-400" : "bg-yellow-500/20 text-yellow-400"}`}>
+                              C{'isInferred' in p && p.isInferred ? "?" : ""}
                             </span>
                           )}
                         </div>
                         <div className="text-right">
                           {p.isCaptain ? (
-                            <span className={p.isInferred ? "text-orange-400 font-semibold" : "text-yellow-400 font-semibold"}>
+                            <span className={`${'isInferred' in p && p.isInferred ? "text-orange-400" : "text-yellow-400"} font-semibold`}>
                               {p.fplScore}{p.transferHits > 0 ? ` - ${p.transferHits}` : ""} × 2 = {p.finalScore}
                             </span>
                           ) : (
-                            <span className="text-white">{p.finalScore}</span>
+                            <span className={liveScoreOverride ? "text-green-300" : "text-white"}>{p.finalScore}{p.transferHits > 0 ? ` (−${p.transferHits})` : ""}</span>
                           )}
                         </div>
                       </div>

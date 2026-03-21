@@ -326,7 +326,7 @@ async function calculateLiveTeamScore(
   gameweek: number
 ): Promise<{
   total: number;
-  players: { name: string; fplScore: number; transferHits: number; isCaptain: boolean; finalScore: number }[];
+  players: { name: string; fplId: string; fplScore: number; transferHits: number; isCaptain: boolean; finalScore: number }[];
 }> {
   const playerScores = [];
   let total = 0;
@@ -343,6 +343,7 @@ async function calculateLiveTeamScore(
 
       playerScores.push({
         name: player.name,
+        fplId: player.fplId,
         fplScore,
         transferHits,
         isCaptain,
@@ -355,6 +356,7 @@ async function calculateLiveTeamScore(
       // Use 0 for this player
       playerScores.push({
         name: player.name,
+        fplId: player.fplId,
         fplScore: 0,
         transferHits: 0,
         isCaptain: false,

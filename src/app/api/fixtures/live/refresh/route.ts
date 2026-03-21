@@ -122,7 +122,7 @@ async function calculateLiveTeamScore(
   gameweek: number
 ): Promise<{
   total: number;
-  players: { name: string; fplScore: number; transferHits: number; isCaptain: boolean; finalScore: number }[];
+  players: { name: string; fplId: string; fplScore: number; transferHits: number; isCaptain: boolean; finalScore: number }[];
 }> {
   // Fetch live gameweek data once (reused for all players)
   const liveData = await fetchLiveGameweek(gameweek);
@@ -182,6 +182,7 @@ async function calculateLiveTeamScore(
 
       playerScores.push({
         name: player.name,
+        fplId: player.fplId,
         fplScore: netScore, // Net FPL score after transfer hits
         transferHits,
         isCaptain,
@@ -193,6 +194,7 @@ async function calculateLiveTeamScore(
       console.error(`Failed to fetch live FPL data for team ${player.fplId} in GW${gameweek}:`, err);
       playerScores.push({
         name: player.name,
+        fplId: player.fplId,
         fplScore: 0,
         transferHits: 0,
         isCaptain: false,
