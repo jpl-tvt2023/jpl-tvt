@@ -81,16 +81,16 @@ function PlayerBreakdown({
 }) {
   if (players.length === 0) return null;
   return (
-    <div>
+    <div className="min-w-0">
       <div className="text-[10px] text-gray-400 mb-1 text-center">{label}</div>
       {players.map((p, i) => (
-        <div key={i} className="flex items-center justify-between py-0.5 text-xs">
-          <div className="flex items-center gap-1">
+        <div key={i} className="flex items-center justify-between py-0.5 text-xs min-w-0">
+          <div className="flex items-center gap-1 min-w-0 flex-1">
             <a
               href={`https://fantasy.premierleague.com/entry/${p.fplId}/event/${gameweek}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-blue-400 hover:text-blue-300 underline"
+              className="text-blue-400 hover:text-blue-300 underline truncate"
             >
               {p.name}
             </a>
@@ -268,7 +268,7 @@ function MatchCard({
           {showLiveLeg1 && liveScoreLeg1 && (liveScoreLeg1.homePlayers?.length ?? 0) > 0 && (
             <div>
               {is2Leg && <div className="text-[10px] text-gray-500 font-semibold mb-1">Leg 1 (GW{tie.gw1})</div>}
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <PlayerBreakdown
                   label={`${tie.home?.abbr || "Home"} Players`}
                   players={getPlayersForSide(tie.home, liveScoreLeg1)}
@@ -286,7 +286,7 @@ function MatchCard({
           {showLiveLeg2 && liveScoreLeg2 && (liveScoreLeg2.homePlayers?.length ?? 0) > 0 && (
             <div className={showLiveLeg1 ? "mt-2" : ""}>
               <div className="text-[10px] text-gray-500 font-semibold mb-1">Leg 2 (GW{tie.gw2})</div>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <PlayerBreakdown
                   label={`${tie.home?.abbr || "Home"} Players`}
                   players={getPlayersForSide(tie.home, liveScoreLeg2)}

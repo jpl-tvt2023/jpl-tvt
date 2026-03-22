@@ -46,6 +46,10 @@ interface DashboardData {
     hasOppCaptainData: boolean;
     myPlayerScores: { name: string; isCaptain: boolean; fplScore: number; transferHits: number; finalScore: number; isInferred?: boolean; fplId?: string; fplUrl?: string }[];
     oppPlayerScores: { name: string; isCaptain: boolean; fplScore: number; transferHits: number; finalScore: number; isInferred?: boolean; fplId?: string; fplUrl?: string }[];
+    isPlayoff?: boolean;
+    roundName?: string | null;
+    tieId?: string | null;
+    leg?: number | null;
   } | null;
   // Add min/max completed GW for navigation
   minCompletedGw?: number;
@@ -260,18 +264,23 @@ export default function DashboardPage() {
 
   const fetchDashboard = useCallback(async (gw?: number) => {
     try {
-      const url = gw ? `/api/team/dashboard?gw=${gw}` : "/api/team/dashboard";
-      const response = await fetch(url);
-      if (response.status === 401) {
-        router.push("/signin");
-        return;
+      if (gw) {
+        // Lightweight GW-only fetch for navigation (no FPL sync, no standings, etc.)
+        const response = await fetch(`/api/team/dashboard/gw-result?gw=${gw}`);
+        if (response.status === 401) { router.push("/signin"); return; }
+        if (!response.ok) throw new Error("Failed to fetch GW result");
+        const gwData = await response.json();
+        setData(prev => prev ? { ...prev, lastGwResult: gwData.lastGwResult, minCompletedGw: gwData.minCompletedGw, maxCompletedGw: gwData.maxCompletedGw } : prev);
+        if (gwData.lastGwResult) setViewedGw(gwData.lastGwResult.gameweek);
+      } else {
+        // Full initial load
+        const response = await fetch("/api/team/dashboard");
+        if (response.status === 401) { router.push("/signin"); return; }
+        if (!response.ok) throw new Error("Failed to fetch dashboard");
+        const dashboardData = await response.json();
+        setData(dashboardData);
+        if (dashboardData.lastGwResult) setViewedGw(dashboardData.lastGwResult.gameweek);
       }
-      if (!response.ok) {
-        throw new Error("Failed to fetch dashboard");
-      }
-      const dashboardData = await response.json();
-      setData(dashboardData);
-      if (dashboardData.lastGwResult) setViewedGw(dashboardData.lastGwResult.gameweek);
     } catch (err) {
       console.error("Dashboard error:", err);
       setError("Failed to load dashboard. Please try again.");
@@ -745,7 +754,10 @@ export default function DashboardPage() {
                     &#8592;
                   </button>
                   <h2 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
-                    <span className="text-yellow-400">📊</span> GW{data.lastGwResult.gameweek} Result
+                    <span className="text-yellow-400">📊</span>
+                    {data.lastGwResult.isPlayoff
+                      ? `${data.lastGwResult.tieId || data.lastGwResult.roundName || "Playoff"}${data.lastGwResult.leg ? ` Leg ${data.lastGwResult.leg}` : ""} (GW${data.lastGwResult.gameweek})`
+                      : `Group Stage — GW${data.lastGwResult.gameweek}`}
                     <button
                       onClick={handleLiveRefresh}
                       disabled={liveRefreshing}
