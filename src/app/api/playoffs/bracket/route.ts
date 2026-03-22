@@ -186,15 +186,68 @@ async function getFinishedGwScoresFromDb(gameweek: number): Promise<any[]> {
 
   if (!gwRecord) return [];
 
-  // Get all playoff fixtures for this GW
+  // Get all playoff fixtures for this GW with team players for bifurcation
   const gwFixtures = await db.query.fixtures.findMany({
     where: and(
       eq(fixtures.gameweekId, gwRecord.id),
       eq(fixtures.isPlayoff, true)
     ),
+    with: {
+      homeTeam: { with: { players: true } },
+      awayTeam: { with: { players: true } },
+    },
   });
 
   if (gwFixtures.length === 0) return [];
+
+  // Get captain picks for this GW to compute player-level breakdowns
+  const captainPicks = await db.query.gameweekCaptains.findMany({
+    where: eq(gameweekCaptains.gameweekId, gwRecord.id),
+    with: { player: true },
+  });
+
+  const captainByTeamId = new Map<string, typeof captainPicks[0]>();
+  for (const pick of captainPicks) {
+    captainByTeamId.set(pick.player.teamId, pick);
+  }
+
+  // Helper to build player breakdown for a team side
+  const buildPlayerBreakdown = (
+    teamPlayers: { id: string; name: string; fplId: string; teamId: string }[],
+    teamId: string,
+    totalScore: number
+  ) => {
+    const captainPick = captainByTeamId.get(teamId);
+    if (captainPick) {
+      return teamPlayers.map(p => {
+        const isCaptain = captainPick.playerId === p.id;
+        if (isCaptain) {
+          return {
+            name: p.name, fplId: p.fplId, isCaptain: true,
+            fplScore: captainPick.fplScore, transferHits: captainPick.transferHits,
+            finalScore: captainPick.doubledScore,
+          };
+        } else {
+          const nonCaptainScore = totalScore - captainPick.doubledScore;
+          return {
+            name: p.name, fplId: p.fplId, isCaptain: false,
+            fplScore: nonCaptainScore, transferHits: 0,
+            finalScore: nonCaptainScore,
+          };
+        }
+      });
+    }
+    // No captain data — infer (least scorer doubled as captain)
+    const captainBase = Math.floor((totalScore - 1) / 3);
+    const captainDoubled = captainBase * 2;
+    const nonCaptainScore = totalScore - captainDoubled;
+    const sorted = [...teamPlayers].sort((a, b) => a.name.localeCompare(b.name));
+    return sorted.map((p, i) => ({
+      name: p.name, fplId: p.fplId, isCaptain: i === 0,
+      fplScore: i === 0 ? captainBase : nonCaptainScore, transferHits: 0,
+      finalScore: i === 0 ? captainDoubled : nonCaptainScore,
+    }));
+  };
 
   // Get corresponding results from DB
   const gwLiveScores = [];
@@ -202,28 +255,20 @@ async function getFinishedGwScoresFromDb(gameweek: number): Promise<any[]> {
     try {
       const result = await db.query.results.findFirst({
         where: eq(results.fixtureId, fixture.id),
-        with: {
-          fixture: {
-            with: {
-              homeTeam: true,
-              awayTeam: true,
-            },
-          },
-        },
       });
 
-      if (result && result.fixture) {
+      if (result) {
         gwLiveScores.push({
           fixtureId: fixture.id,
-          gameweek: gameweek,  // Track which GW this score is from
-          homeTeamName: result.fixture.homeTeam.name,
-          awayTeamName: result.fixture.awayTeam.name,
-          homeTeamAbbr: result.fixture.homeTeam.abbreviation,
-          awayTeamAbbr: result.fixture.awayTeam.abbreviation,
+          gameweek: gameweek,
+          homeTeamName: fixture.homeTeam.name,
+          awayTeamName: fixture.awayTeam.name,
+          homeTeamAbbr: fixture.homeTeam.abbreviation,
+          awayTeamAbbr: fixture.awayTeam.abbreviation,
           homeScore: result.homeScore,
           awayScore: result.awayScore,
-          homePlayers: [],
-          awayPlayers: [],
+          homePlayers: buildPlayerBreakdown(fixture.homeTeam.players, fixture.homeTeamId, result.homeScore),
+          awayPlayers: buildPlayerBreakdown(fixture.awayTeam.players, fixture.awayTeamId, result.awayScore),
         });
       }
     } catch (err) {

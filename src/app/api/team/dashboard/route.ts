@@ -327,6 +327,10 @@ export async function GET(request: NextRequest) {
         hasOppCaptainData,
         myPlayerScores,
         oppPlayerScores,
+        isPlayoff: lastF.isPlayoff || false,
+        roundName: lastF.roundName || null,
+        tieId: lastF.tieId || null,
+        leg: lastF.leg || null,
       };
     }
     
