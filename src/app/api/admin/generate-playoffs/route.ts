@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { fixtures, playoffTies, gameweeks, results, groups } from "@/lib/db/schema";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, sql, or, like, inArray } from "drizzle-orm";
 
 // RO16 seeding: [tieId, homeGroupLetter, homeRank, awayGroupLetter, awayRank]
 const RO16_SEEDING: [string, string, number, string, number][] = [
@@ -42,8 +42,41 @@ export async function GET(request: NextRequest) {
 }
 
 /**
+ * DELETE /api/admin/generate-playoffs
+ * Delete existing RO16 + C-31 playoff ties, fixtures, and results so they can be regenerated
+ */
+export async function DELETE(request: NextRequest) {
+  const sessionType = request.headers.get("x-session-type");
+  if (sessionType !== "admin") {
+    return NextResponse.json({ error: "Admin access required" }, { status: 403 });
+  }
+
+  // Find all RO16 and C-31 fixture IDs to delete their results first
+  const initialFixtures = await db.select({ id: fixtures.id }).from(fixtures)
+    .where(or(like(fixtures.tieId, "RO16-%"), like(fixtures.tieId, "C-31-%")));
+  const fixtureIds = initialFixtures.map(f => f.id);
+
+  await db.transaction(async (tx) => {
+    // Delete results for these fixtures
+    if (fixtureIds.length > 0) {
+      await tx.delete(results).where(inArray(results.fixtureId, fixtureIds));
+    }
+    // Delete the fixtures themselves
+    await tx.run(sql`DELETE FROM fixtures WHERE tie_id LIKE 'RO16-%' OR tie_id LIKE 'C-31-%'`);
+    // Delete the playoff ties
+    await tx.run(sql`DELETE FROM playoff_ties WHERE tie_id LIKE 'RO16-%' OR tie_id LIKE 'C-31-%'`);
+  });
+
+  return NextResponse.json({
+    success: true,
+    message: `Deleted ${fixtureIds.length} fixtures and their associated ties/results`,
+    deletedFixtures: fixtureIds.length,
+  });
+}
+
+/**
  * POST /api/admin/generate-playoffs
- * One-time operation: generate RO16 + C-31 fixtures from GW30 group standings
+ * Generate RO16 + C-31 fixtures from GW30 group standings
  */
 export async function POST(request: NextRequest) {
   const sessionType = request.headers.get("x-session-type");
@@ -51,10 +84,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Admin access required" }, { status: 403 });
   }
 
-  // Check not already generated
-  const existingTies = await db.select().from(playoffTies).limit(1);
-  if (existingTies.length > 0) {
-    return NextResponse.json({ error: "Playoffs have already been generated" }, { status: 400 });
+  // Check if RO16/C-31 already exist (allow regeneration after DELETE)
+  const existingInitialTies = await db.select().from(playoffTies)
+    .where(or(like(playoffTies.tieId, "RO16-%"), like(playoffTies.tieId, "C-31-%")))
+    .limit(1);
+  if (existingInitialTies.length > 0) {
+    return NextResponse.json({ error: "RO16/C-31 playoffs already exist. Delete them first to regenerate." }, { status: 400 });
   }
 
   // Fetch group standings (reuse same logic as standings route)

@@ -439,8 +439,35 @@ export default function AdminDashboard() {
       if (!res.ok) {
         setMessage({ type: "error", text: data.error || "Failed to generate playoffs" });
       } else {
-        setMessage({ type: "success", text: `Playoffs generated: ${data.tvtTies} TVT ties + ${data.challengerTies} Challenger ties` });
+        setMessage({ type: "success", text: data.message || "Playoffs generated successfully" });
         setPlayoffsGenerated(true);
+      }
+    } catch {
+      setMessage({ type: "error", text: "Network error" });
+    } finally {
+      setPlayoffsLoading(false);
+    }
+  };
+
+  const regeneratePlayoffs = async () => {
+    if (!window.confirm("This will DELETE all existing RO16 and C-31 fixtures/results and regenerate them from current standings. Continue?")) return;
+    setPlayoffsLoading(true);
+    setMessage(null);
+    try {
+      // Step 1: Delete existing RO16 + C-31
+      const delRes = await fetch("/api/admin/generate-playoffs", { method: "DELETE" });
+      const delData = await delRes.json();
+      if (!delRes.ok) {
+        setMessage({ type: "error", text: delData.error || "Failed to delete existing playoffs" });
+        return;
+      }
+      // Step 2: Regenerate from current standings
+      const genRes = await fetch("/api/admin/generate-playoffs", { method: "POST" });
+      const genData = await genRes.json();
+      if (!genRes.ok) {
+        setMessage({ type: "error", text: genData.error || "Failed to regenerate playoffs" });
+      } else {
+        setMessage({ type: "success", text: `Playoffs regenerated: ${genData.message}` });
       }
     } catch {
       setMessage({ type: "error", text: "Network error" });
@@ -2427,6 +2454,20 @@ export default function AdminDashboard() {
               ) : (
                 <div>
                   <p className="text-green-400 text-sm mb-6">✓ Playoffs generated. Use the buttons below to advance each gameweek after scoring is complete.</p>
+
+                  <div className="mb-6">
+                    <button
+                      onClick={regeneratePlayoffs}
+                      disabled={playoffsLoading}
+                      className="px-6 py-3 rounded-lg bg-gradient-to-r from-red-500 to-orange-500 text-white font-bold hover:from-red-400 hover:to-orange-400 disabled:opacity-50 transition"
+                    >
+                      {playoffsLoading ? "Regenerating…" : "Regenerate Playoff Fixtures (RO16 + C-31)"}
+                    </button>
+                    <p className="text-gray-500 text-xs mt-2">
+                      Deletes existing RO16 &amp; C-31 fixtures/results and regenerates from current standings.
+                      Use this if the initial standings were incorrect.
+                    </p>
+                  </div>
 
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                     {[31, 32, 33, 34, 35, 36, 37, 38].map((gw) => (

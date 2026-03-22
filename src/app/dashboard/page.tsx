@@ -18,6 +18,7 @@ interface DashboardData {
     gameweek: number;
     timestamp: string | null;
   };
+  serverTime: string;
   upcomingFixture: {
     isHome: boolean;
     opponent: {
@@ -104,16 +105,21 @@ interface DashboardData {
 }
 
 // Countdown Timer Component
-function DeadlineTimer({ deadline, gameweek }: { deadline: string | null; gameweek: number }) {
+function DeadlineTimer({ deadline, gameweek, serverTime }: { deadline: string | null; gameweek: number; serverTime?: string }) {
   const [timeLeft, setTimeLeft] = useState<{ days: number; hours: number; minutes: number; seconds: number } | null>(null);
   const [isExpired, setIsExpired] = useState(false);
+  // Compute server-client time offset once on mount so the countdown
+  // reflects the server clock, not the (possibly drifted) client clock.
+  const [serverOffset] = useState(() =>
+    serverTime ? new Date(serverTime).getTime() - Date.now() : 0
+  );
 
   useEffect(() => {
     if (!deadline) return;
 
     const calculateTimeLeft = () => {
       const deadlineDate = new Date(deadline);
-      const now = new Date();
+      const now = new Date(Date.now() + serverOffset);
       const diff = deadlineDate.getTime() - now.getTime();
 
       if (diff <= 0) {
@@ -507,7 +513,7 @@ export default function DashboardPage() {
                 <h2 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
                   <span className="text-yellow-400">⏱</span> Deadline
                 </h2>
-                <DeadlineTimer deadline={data.deadline.timestamp} gameweek={data.deadline.gameweek} />
+                <DeadlineTimer deadline={data.deadline.timestamp} gameweek={data.deadline.gameweek} serverTime={data.serverTime} />
               </div>
 
               {/* Upcoming Fixture */}

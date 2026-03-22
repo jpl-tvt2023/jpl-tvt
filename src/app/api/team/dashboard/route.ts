@@ -630,6 +630,7 @@ export async function GET(request: NextRequest) {
         gameweek: nextGameweek?.number || 0,
         timestamp: nextGameweek?.deadline?.toISOString() || null,
       },
+      serverTime: new Date().toISOString(),
       upcomingFixture,
       upcomingCaptainSubmitted,
       upcomingChip,
