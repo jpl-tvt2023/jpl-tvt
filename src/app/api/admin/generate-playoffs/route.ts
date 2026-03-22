@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { fixtures, playoffTies, gameweeks, results, groups } from "@/lib/db/schema";
 import { eq, and, sql, or, like, inArray } from "drizzle-orm";
+import { getAllCachedScores } from "@/lib/fpl-cache";
+import { calculateTeamGameweekScore } from "@/lib/fpl";
 
 // RO16 seeding: [tieId, homeGroupLetter, homeRank, awayGroupLetter, awayRank]
 const RO16_SEEDING: [string, string, number, string, number][] = [
@@ -249,12 +251,59 @@ async function getGroupStandings(): Promise<{ groupA: RankedTeam[]; groupB: Rank
       },
     });
 
+    // Build per-GW, per-player hits map for hit penalty (-1 league pt per GW a player exceeds 12 hits)
+    const playerGwHitsMap = new Map<string, Map<number, number>>();
+    const allFplIds = new Set<string>();
+    for (const t of allTeams) {
+      for (const p of t.players) {
+        allFplIds.add(p.fplId);
+      }
+    }
+
+    // Determine which GWs (1-30) have been processed
+    const processedGws = new Set<number>();
+    for (const t of allTeams) {
+      for (const f of [...t.homeFixtures, ...t.awayFixtures]) {
+        if (f.result && f.gameweek.number <= 30) {
+          processedGws.add(f.gameweek.number);
+        }
+      }
+    }
+
+    for (const gw of processedGws) {
+      const gwCache = await getAllCachedScores(gw);
+      const suffix = `_gw${gw}`;
+      if (Object.keys(gwCache).length > 0) {
+        for (const [key, data] of Object.entries(gwCache)) {
+          if (key.endsWith(suffix)) {
+            const fplId = key.slice(0, -suffix.length);
+            if (!playerGwHitsMap.has(fplId)) playerGwHitsMap.set(fplId, new Map());
+            playerGwHitsMap.get(fplId)!.set(gw, data.transferHits);
+          }
+        }
+      } else {
+        for (const fplId of allFplIds) {
+          try {
+            const score = await calculateTeamGameweekScore(fplId, gw);
+            if (!playerGwHitsMap.has(fplId)) playerGwHitsMap.set(fplId, new Map());
+            playerGwHitsMap.get(fplId)!.set(gw, score.transferHits);
+          } catch {
+            // FPL API may fail — skip gracefully
+          }
+        }
+      }
+    }
+
     const allChipsRaw = await db.query.gameweekChips.findMany({
       with: { gameweek: true },
     });
 
     const chipPointsByTeam = new Map<string, number>();
     for (const chip of allChipsRaw) {
+      // Only count chips from league stage (GW 1-30)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const chipGw = (chip as any).gameweek?.number;
+      if (chipGw && chipGw > 30) continue;
       if (chip.isProcessed) {
         const pts = chip.pointsAwarded || 0;
         if (chip.chipType === "C" || pts > 0) {
@@ -266,8 +315,10 @@ async function getGroupStandings(): Promise<{ groupA: RankedTeam[]; groupB: Rank
     const standings = allTeams.map((team) => {
       let wins = 0, draws = 0, losses = 0, pointsFor = 0, pointsAgainst = 0, bonusPtsTotal = 0;
 
+      // Process home fixtures (league stage only — GW 1-30)
       for (const fixture of team.homeFixtures) {
-        if (fixture.result && !fixture.isPlayoff) {
+        if (fixture.gameweek.number > 30) continue;
+        if (fixture.result) {
           pointsFor += fixture.result.homeScore;
           pointsAgainst += fixture.result.awayScore;
           if (fixture.result.homeScore > fixture.result.awayScore) wins++;
@@ -279,8 +330,10 @@ async function getGroupStandings(): Promise<{ groupA: RankedTeam[]; groupB: Rank
         }
       }
 
+      // Process away fixtures (league stage only — GW 1-30)
       for (const fixture of team.awayFixtures) {
-        if (fixture.result && !fixture.isPlayoff) {
+        if (fixture.gameweek.number > 30) continue;
+        if (fixture.result) {
           pointsFor += fixture.result.awayScore;
           pointsAgainst += fixture.result.homeScore;
           if (fixture.result.awayScore > fixture.result.homeScore) wins++;
@@ -294,7 +347,19 @@ async function getGroupStandings(): Promise<{ groupA: RankedTeam[]; groupB: Rank
 
       const chipPts = chipPointsByTeam.get(team.id) || 0;
       const cbpPts = chipPts + bonusPtsTotal;
-      const leaguePoints = (wins * 2) + draws + cbpPts;
+
+      // Compute hit penalty: -1 league point per GW where any player on this team took >12 hits
+      let hitPenaltyTotal = 0;
+      for (const player of team.players) {
+        const gwHits = playerGwHitsMap.get(player.fplId);
+        if (gwHits) {
+          for (const [, hits] of gwHits.entries()) {
+            if (hits > 12) hitPenaltyTotal++;
+          }
+        }
+      }
+
+      const leaguePoints = (wins * 2) + draws + cbpPts - hitPenaltyTotal;
 
       return {
         teamId: team.id,
