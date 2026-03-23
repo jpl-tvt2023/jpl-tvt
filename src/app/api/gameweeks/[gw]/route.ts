@@ -141,6 +141,79 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 }
 
 /**
+ * Auto-assign a default captain when no captain was announced.
+ * Penalty: the LOWEST scoring player becomes captain (their lower score gets doubled).
+ * Tiebreak: if both players have identical netScore, use the previous GW's captain.
+ * If no previous captain exists (GW1), pick the first player alphabetically.
+ */
+async function autoAssignDefaultCaptain(
+  team: Team & { players: Player[] },
+  scores: { playerId: string; playerName: string; points: number; transferHits: number; netScore: number }[],
+  gameweekId: string,
+  gameweekNumber: number
+): Promise<GameweekCaptain | null> {
+  if (team.players.length === 0) return null;
+
+  // Find the lowest scorer (penalty for not announcing)
+  const sorted = [...scores].sort((a, b) => a.netScore - b.netScore);
+  let defaultPlayerId: string;
+
+  if (sorted.length >= 2 && sorted[0].netScore === sorted[1].netScore) {
+    // Tiebreak: use previous GW's captain for this team
+    let prevCaptainPlayerId: string | null = null;
+    if (gameweekNumber > 1) {
+      const prevGw = await db.query.gameweeks.findFirst({
+        where: eq(gameweeks.number, gameweekNumber - 1),
+      });
+      if (prevGw) {
+        const prevCaptains = await db.query.gameweekCaptains.findMany({
+          where: eq(gameweekCaptains.gameweekId, prevGw.id),
+          with: { player: true },
+        });
+        const prevTeamCaptain = prevCaptains.find(c => c.player.teamId === team.id);
+        if (prevTeamCaptain) {
+          prevCaptainPlayerId = prevTeamCaptain.playerId;
+        }
+      }
+    }
+    // Use previous captain if found, otherwise first alphabetically
+    if (prevCaptainPlayerId && team.players.some(p => p.id === prevCaptainPlayerId)) {
+      defaultPlayerId = prevCaptainPlayerId;
+    } else {
+      const alphabetical = [...team.players].sort((a, b) => a.name.localeCompare(b.name));
+      defaultPlayerId = alphabetical[0].id;
+    }
+  } else {
+    // Lowest scorer becomes captain
+    defaultPlayerId = sorted[0].playerId;
+  }
+
+  // Create a gameweekCaptains record marked as auto-assigned (isValid: false)
+  const captainId = generateId();
+  await db.insert(gameweekCaptains).values({
+    id: captainId,
+    gameweekId: gameweekId,
+    playerId: defaultPlayerId,
+    announcedAt: new Date(),
+    isValid: false, // Auto-assigned, not manually announced
+  });
+
+  // Return the record in the expected shape
+  return {
+    id: captainId,
+    gameweekId: gameweekId,
+    playerId: defaultPlayerId,
+    fplScore: 0,
+    transferHits: 0,
+    doubledScore: 0,
+    announcedAt: new Date(),
+    isValid: false,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  } as GameweekCaptain;
+}
+
+/**
  * POST /api/gameweeks/[gw]
  * Process gameweek - fetch FPL scores and calculate results
  * Query params:
@@ -322,40 +395,56 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     for (const fixture of unprocessedFixtures) {
       try {
         // Get captain info for each team
-        const homeCaptain = gameweek.captains.find(
+        let homeCaptain = gameweek.captains.find(
           (c: GameweekCaptain) => fixture.homeTeam.players.some((p: Player) => p.id === c.playerId)
         );
-        const awayCaptain = gameweek.captains.find(
+        let awayCaptain = gameweek.captains.find(
           (c: GameweekCaptain) => fixture.awayTeam.players.some((p: Player) => p.id === c.playerId)
         );
 
-        // Fetch FPL scores for all players
-        const homeScores = await Promise.all(
+        // Fetch FPL scores for all players (captain flag set after default assignment)
+        const homeScoresRaw = await Promise.all(
           fixture.homeTeam.players.map(async (player: Player) => {
             const score = await calculateTeamGameweekScore(player.fplId, gameweekNumber);
-            return {
-              playerId: player.id,
-              isCaptain: homeCaptain?.playerId === player.id,
-              ...score,
-            };
+            return { playerId: player.id, playerName: player.name, ...score };
           })
         );
 
-        const awayScores = await Promise.all(
+        const awayScoresRaw = await Promise.all(
           fixture.awayTeam.players.map(async (player: Player) => {
             const score = await calculateTeamGameweekScore(player.fplId, gameweekNumber);
-            return {
-              playerId: player.id,
-              isCaptain: awayCaptain?.playerId === player.id,
-              ...score,
-            };
+            return { playerId: player.id, playerName: player.name, ...score };
           })
         );
+
+        // Auto-assign default captain if none announced
+        // Penalty: the LOWEST scoring player becomes captain (doubling the lower score)
+        if (!homeCaptain) {
+          homeCaptain = await autoAssignDefaultCaptain(
+            fixture.homeTeam, homeScoresRaw, gameweek.id, gameweekNumber
+          );
+        }
+        if (!awayCaptain) {
+          awayCaptain = await autoAssignDefaultCaptain(
+            fixture.awayTeam, awayScoresRaw, gameweek.id, gameweekNumber
+          );
+        }
+
+        // Set isCaptain flag now that captains are resolved
+        const homeScores = homeScoresRaw.map(s => ({
+          ...s,
+          isCaptain: homeCaptain?.playerId === s.playerId,
+        }));
+
+        const awayScores = awayScoresRaw.map(s => ({
+          ...s,
+          isCaptain: awayCaptain?.playerId === s.playerId,
+        }));
 
         // Persist captain FPL scores to gameweekCaptains table
         // so dashboard can display actual player-by-player score breakdowns
         if (homeCaptain) {
-          const captainScore = homeScores.find(s => s.playerId === homeCaptain.playerId);
+          const captainScore = homeScores.find(s => s.playerId === homeCaptain!.playerId);
           if (captainScore) {
             const doubled = (captainScore.points - captainScore.transferHits) * 2;
             await db.update(gameweekCaptains)
@@ -369,7 +458,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           }
         }
         if (awayCaptain) {
-          const captainScore = awayScores.find(s => s.playerId === awayCaptain.playerId);
+          const captainScore = awayScores.find(s => s.playerId === awayCaptain!.playerId);
           if (captainScore) {
             const doubled = (captainScore.points - captainScore.transferHits) * 2;
             await db.update(gameweekCaptains)

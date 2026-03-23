@@ -18,13 +18,14 @@ const RO16_SEEDING: [string, string, number, string, number][] = [
 ];
 
 // C-31 seeding: [tieId, homeGroupLetter, homeRank, awayGroupLetter, awayRank]
+// Cross-group: Group A rank vs Group B mirror rank (9v14, 10v13, ..., 14v9)
 const C31_SEEDING: [string, string, number, string, number][] = [
-  ["C-31-A", "A", 9, "B", 14],
-  ["C-31-B", "B", 9, "A", 14],
-  ["C-31-C", "A", 10, "B", 13],
-  ["C-31-D", "B", 10, "A", 13],
-  ["C-31-E", "A", 11, "B", 12],
-  ["C-31-F", "B", 11, "A", 12],
+  ["C-31-A", "A", 9,  "B", 14],
+  ["C-31-B", "A", 10, "B", 13],
+  ["C-31-C", "A", 11, "B", 12],
+  ["C-31-D", "A", 12, "B", 11],
+  ["C-31-E", "A", 13, "B", 10],
+  ["C-31-F", "A", 14, "B", 9],
 ];
 
 /**

@@ -75,34 +75,41 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check captaincy chip availability (15 per player in League Stage)
-    // Count actual captain announcements for this player
-    const playerCaptainHistory = await db.query.gameweekCaptains.findMany({
-      where: eq(gameweekCaptains.playerId, playerId),
-      with: { gameweek: true },
-    });
-    const leagueStageCount = playerCaptainHistory.filter(c => c.gameweek.number <= 30).length;
-
-    if (gameweekNumber <= 30 && leagueStageCount >= 15) {
-      return NextResponse.json(
-        { error: `${player.name} has used all 15 captaincy chips for the League Stage` },
-        { status: 400 }
-      );
-    }
-
     // Check if captain already announced for this gameweek by this team
     const existingCaptains = await db.query.gameweekCaptains.findMany({
       where: eq(gameweekCaptains.gameweekId, gw.id),
       with: { player: true },
     });
-    
-    const existingCaptain = existingCaptains.find(c => c.player.teamId === teamId);
 
-    if (existingCaptain) {
+    const existingCaptain = existingCaptains.find(c => c.player.teamId === teamId);
+    const isSwitching = !!existingCaptain;
+    const switchingToSamePlayer = existingCaptain?.playerId === playerId;
+
+    if (switchingToSamePlayer) {
       return NextResponse.json(
-        { error: "Captain already announced for this gameweek" },
+        { error: "This player is already your captain for this gameweek" },
         { status: 400 }
       );
+    }
+
+    // Check captaincy chip availability (15 per player in League Stage)
+    // Only the final selection counts toward the limit
+    if (gameweekNumber <= 30) {
+      const playerCaptainHistory = await db.query.gameweekCaptains.findMany({
+        where: eq(gameweekCaptains.playerId, playerId),
+        with: { gameweek: true },
+      });
+      // Exclude the current GW if this player was already captain for it (switching back)
+      const leagueStageCount = playerCaptainHistory.filter(
+        c => c.gameweek.number <= 30 && c.gameweek.id !== gw.id
+      ).length;
+
+      if (leagueStageCount >= 15) {
+        return NextResponse.json(
+          { error: `${player.name} has used all 15 captaincy chips for the League Stage` },
+          { status: 400 }
+        );
+      }
     }
 
     // Check deadline (must be announced before FPL deadline)
@@ -110,46 +117,63 @@ export async function POST(request: NextRequest) {
     const deadline = new Date(gw.deadline);
     const isLate = now >= deadline;
 
-    // Create the captain announcement
-    const captainId = generateId();
-    await db.insert(gameweekCaptains).values({
-      id: captainId,
-      gameweekId: gw.id,
-      playerId: player.id,
-      announcedAt: now,
-      isValid: !isLate, // Invalid if announced after deadline
-    });
+    if (isSwitching) {
+      // Update existing captain record to the new player
+      await db.update(gameweekCaptains)
+        .set({
+          playerId: player.id,
+          announcedAt: now,
+          isValid: !isLate,
+          updatedAt: new Date(),
+        })
+        .where(eq(gameweekCaptains.id, existingCaptain.id));
+    } else {
+      // Create new captain announcement
+      const captainId = generateId();
+      await db.insert(gameweekCaptains).values({
+        id: captainId,
+        gameweekId: gw.id,
+        playerId: player.id,
+        announcedAt: now,
+        isValid: !isLate,
+      });
+    }
 
     // Log late announcement as penalty
     if (isLate) {
       await db.insert(auditLogs).values({
         id: generateId(),
         type: "PENALTY",
-        description: `Late captain announcement for GW${gameweekNumber}`,
+        description: `Late captain ${isSwitching ? "switch" : "announcement"} for GW${gameweekNumber}`,
         teamId: teamId,
         gameweekId: gw.id,
-        pointsAffected: 0, // Penalty applied via isValid flag
+        pointsAffected: 0,
       });
     }
 
-    // Calculate remaining chips
-    const chipsRemaining = gameweekNumber <= 30 
-      ? 15 - (leagueStageCount + 1) 
+    // Calculate remaining chips for the selected player
+    const updatedHistory = await db.query.gameweekCaptains.findMany({
+      where: eq(gameweekCaptains.playerId, playerId),
+      with: { gameweek: true },
+    });
+    const finalLeagueCount = updatedHistory.filter(c => c.gameweek.number <= 30).length;
+    const chipsRemaining = gameweekNumber <= 30
+      ? 15 - finalLeagueCount
       : "unlimited";
 
     return NextResponse.json({
       success: true,
-      message: isLate 
-        ? "Captain announced but marked as late (after deadline)" 
-        : "Captain announced successfully",
+      message: isLate
+        ? `Captain ${isSwitching ? "switched" : "announced"} but marked as late (after deadline)`
+        : `Captain ${isSwitching ? "switched" : "announced"} successfully`,
       captain: {
-        id: captainId,
         playerName: player.name,
         teamName: team.name,
         gameweek: gameweekNumber,
         announcedAt: now.toISOString(),
         isValid: !isLate,
         captaincyChipsRemaining: chipsRemaining,
+        wasSwitched: isSwitching,
       },
     });
   } catch (error) {

@@ -29,7 +29,7 @@ interface DashboardData {
     };
     gameweek: number;
   } | null;
-  upcomingCaptainSubmitted: boolean;
+  upcomingCaptain: { playerId: string; playerName: string } | null;
   upcomingChip: { type: string; chipName: string } | null;
   lastGwResult: {
     gameweek: number;
@@ -248,7 +248,7 @@ export default function DashboardPage() {
   
   // Submission states
   const [selectedCaptain, setSelectedCaptain] = useState<string>("");
-  const [selectedChip, setSelectedChip] = useState<string>("");
+  const [selectedChip, setSelectedChip] = useState<string | null>(null);
   const [selectedChallengedTeam, setSelectedChallengedTeam] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitMessage, setSubmitMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
@@ -366,8 +366,8 @@ export default function DashboardPage() {
       if (!response.ok) {
         setSubmitMessage({ type: "error", text: result.error || "Failed to submit captain" });
       } else {
-        setSubmitMessage({ type: "success", text: `Captain ${result.captain.playerName} announced for GW${data.deadline.gameweek}` });
-        setSelectedCaptain("");
+        const action = result.captain.wasSwitched ? "switched to" : "announced as";
+        setSubmitMessage({ type: "success", text: `${result.captain.playerName} ${action} captain for GW${data.deadline.gameweek}` });
         // Refresh dashboard data
         fetchDashboard();
       }
@@ -379,7 +379,16 @@ export default function DashboardPage() {
   };
   
   const handleChipSubmit = async () => {
-    if (!selectedChip || !data) return;
+    if (!data || selectedChip === null) return;
+
+    // "No Chip" selected while a chip is active → cancel it
+    if (selectedChip === "" && data.upcomingChip) {
+      await handleCancelChip();
+      setSelectedChip(null);
+      return;
+    }
+
+    if (!selectedChip) return;
     if (selectedChip === "C" && !selectedChallengedTeam) return;
     
     setIsSubmitting(true);
@@ -402,8 +411,7 @@ export default function DashboardPage() {
         setSubmitMessage({ type: "error", text: result.error || "Failed to submit chip" });
       } else {
         setSubmitMessage({ type: "success", text: result.message });
-        setSelectedChip("");
-        setSelectedChallengedTeam("");
+        setSelectedChip(null);
         // Refresh dashboard data
         fetchDashboard();
       }
@@ -610,19 +618,21 @@ export default function DashboardPage() {
                       <span className="w-3 h-3 rounded-full bg-red-400"></span>
                       Captain announcements are currently disabled
                     </div>
-                  ) : data.upcomingCaptainSubmitted ? (
-                    <div className="flex items-center gap-2 text-green-400 mb-3">
-                      <span className="w-3 h-3 rounded-full bg-green-400"></span>
-                      Submitted
-                    </div>
                   ) : (
                     <>
-                      <div className="flex items-center gap-2 text-orange-400 mb-3">
-                        <span className="w-3 h-3 rounded-full bg-orange-400"></span>
-                        Not Submitted
-                      </div>
+                      {data.upcomingCaptain ? (
+                        <div className="flex items-center gap-2 text-green-400 mb-3">
+                          <span className="w-3 h-3 rounded-full bg-green-400"></span>
+                          {data.upcomingCaptain.playerName} selected
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2 text-orange-400 mb-3">
+                          <span className="w-3 h-3 rounded-full bg-orange-400"></span>
+                          Not Submitted
+                        </div>
+                      )}
                       <select
-                        value={selectedCaptain}
+                        value={selectedCaptain || data.upcomingCaptain?.playerId || ""}
                         onChange={(e) => setSelectedCaptain(e.target.value)}
                         className="w-full p-2 rounded-lg bg-slate-800 text-white border border-white/30 mb-3 focus:border-yellow-400 focus:outline-none"
                         disabled={isSubmitting}
@@ -641,10 +651,10 @@ export default function DashboardPage() {
                       </select>
                       <button
                         onClick={handleCaptainSubmit}
-                        disabled={!selectedCaptain || isSubmitting}
+                        disabled={!selectedCaptain || isSubmitting || selectedCaptain === data.upcomingCaptain?.playerId}
                         className="w-full py-2 rounded-lg bg-gradient-to-r from-yellow-400 to-orange-500 text-slate-900 font-semibold disabled:opacity-50 disabled:cursor-not-allowed hover:from-yellow-300 hover:to-orange-400 transition"
                       >
-                        {isSubmitting ? "Submitting..." : "Announce Captain"}
+                        {isSubmitting ? "Submitting..." : data.upcomingCaptain ? "Switch Captain" : "Announce Captain"}
                       </button>
                     </>
                   )}
@@ -671,40 +681,37 @@ export default function DashboardPage() {
                       <span className="w-3 h-3 rounded-full bg-red-400"></span>
                       Chip announcements are currently disabled
                     </div>
-                  ) : data.upcomingChip ? (
-                    <div className="mb-3">
-                      <div className="flex items-center gap-2 text-green-400 mb-2">
-                        <span className="w-3 h-3 rounded-full bg-green-400"></span>
-                        {data.upcomingChip.chipName} selected
-                      </div>
-                      <button
-                        onClick={handleCancelChip}
-                        disabled={isSubmitting}
-                        className="w-full py-2 rounded-lg bg-red-500/20 text-red-400 font-semibold hover:bg-red-500/30 transition disabled:opacity-50"
-                      >
-                        {isSubmitting ? "Cancelling..." : "Cancel Chip"}
-                      </button>
-                    </div>
                   ) : data.chipStatus.currentSet !== "playoffs" ? (
                     <>
+                      {data.upcomingChip ? (
+                        <div className="flex items-center gap-2 text-green-400 mb-3">
+                          <span className="w-3 h-3 rounded-full bg-green-400"></span>
+                          {data.upcomingChip.chipName} selected
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2 text-orange-400 mb-3">
+                          <span className="w-3 h-3 rounded-full bg-orange-400"></span>
+                          No chip selected
+                        </div>
+                      )}
                       <select
-                        value={selectedChip}
+                        value={selectedChip ?? data.upcomingChip?.type ?? ""}
                         onChange={(e) => { setSelectedChip(e.target.value); setSelectedChallengedTeam(""); }}
                         className="w-full p-2 rounded-lg bg-slate-800 text-white border border-white/30 mb-3 focus:border-purple-400 focus:outline-none"
                         disabled={isSubmitting}
                       >
-                        <option value="">Select chip (optional)...</option>
-                        {!currentChipSet.doublePointer.used && (
+                        <option value="">No Chip</option>
+                        {(!currentChipSet.doublePointer.used || data.upcomingChip?.type === "D") && (
                           <option value="D">Double Pointer (DP)</option>
                         )}
-                        {!currentChipSet.challengeChip.used && (
+                        {(!currentChipSet.challengeChip.used || data.upcomingChip?.type === "C") && (
                           <option value="C">Challenge Chip (CC)</option>
                         )}
-                        {!currentChipSet.winWin.used && (
+                        {(!currentChipSet.winWin.used || data.upcomingChip?.type === "W") && (
                           <option value="W">Win-Win (WW)</option>
                         )}
                       </select>
-                      {selectedChip === "C" && (
+                      {(selectedChip ?? data.upcomingChip?.type) === "C" && (
                         <div className="mb-3">
                           <label className="block text-xs text-gray-400 mb-1">Challenge against (top 2 from opposite group)</label>
                           <select
@@ -722,10 +729,15 @@ export default function DashboardPage() {
                       )}
                       <button
                         onClick={handleChipSubmit}
-                        disabled={!selectedChip || isSubmitting || (selectedChip === "C" && !selectedChallengedTeam)}
+                        disabled={
+                          isSubmitting ||
+                          selectedChip === null ||
+                          selectedChip === (data.upcomingChip?.type ?? "") ||
+                          ((selectedChip ?? data.upcomingChip?.type) === "C" && !selectedChallengedTeam)
+                        }
                         className="w-full py-2 rounded-lg bg-purple-500/20 text-purple-400 font-semibold disabled:opacity-50 disabled:cursor-not-allowed hover:bg-purple-500/30 transition"
                       >
-                        {isSubmitting ? "Submitting..." : "Use Chip"}
+                        {isSubmitting ? "Submitting..." : selectedChip === "" && data.upcomingChip ? "Remove Chip" : data.upcomingChip && selectedChip !== null ? "Switch Chip" : "Use Chip"}
                       </button>
                     </>
                   ) : (

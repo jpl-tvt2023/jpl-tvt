@@ -126,11 +126,34 @@ export async function POST(request: NextRequest) {
       ),
     });
 
-    if (existingChip) {
+    // If switching to same chip type, no-op
+    if (existingChip && existingChip.chipType === chipType) {
       return NextResponse.json(
-        { error: "You have already submitted a chip for this gameweek" },
+        { error: `${chipName} is already selected for this gameweek` },
         { status: 400 }
       );
+    }
+
+    // If switching chip types, check the NEW type isn't already used in the set
+    // (the old type doesn't count since we're replacing it)
+    if (existingChip && existingChip.chipType !== chipType) {
+      // Re-check only the NEW chip type against the set (old one is being freed)
+      let newChipAlreadyUsedInSet = false;
+      if (chipSet === 1) {
+        if (chipType === "D" && team.doublePointerSet1Used) newChipAlreadyUsedInSet = true;
+        if (chipType === "C" && team.challengeChipSet1Used) newChipAlreadyUsedInSet = true;
+        if (chipType === "W" && team.winWinSet1Used) newChipAlreadyUsedInSet = true;
+      } else {
+        if (chipType === "D" && team.doublePointerSet2Used) newChipAlreadyUsedInSet = true;
+        if (chipType === "C" && team.challengeChipSet2Used) newChipAlreadyUsedInSet = true;
+        if (chipType === "W" && team.winWinSet2Used) newChipAlreadyUsedInSet = true;
+      }
+      if (newChipAlreadyUsedInSet) {
+        return NextResponse.json(
+          { error: `${chipName} has already been used for Set ${chipSet} (GW${chipSet === 1 ? "1-15" : "16-30"})` },
+          { status: 400 }
+        );
+      }
     }
 
     // For Challenge Chip, validate the challenged team
@@ -166,7 +189,30 @@ export async function POST(request: NextRequest) {
       validatedChallengedTeamId = challengedTeamId;
     }
 
-    // Create the chip submission
+    if (existingChip) {
+      // Switch: update existing chip record
+      await db.update(gameweekChips)
+        .set({
+          chipType,
+          challengedTeamId: validatedChallengedTeamId,
+          updatedAt: new Date(),
+        })
+        .where(eq(gameweekChips.id, existingChip.id));
+
+      return NextResponse.json({
+        success: true,
+        message: `Chip switched to ${chipName} for GW${gameweekNumber}`,
+        chip: {
+          id: existingChip.id,
+          type: chipType,
+          name: chipName,
+          gameweek: gameweekNumber,
+          wasSwitched: true,
+        },
+      });
+    }
+
+    // Create new chip submission
     const chipId = generateId();
     await db.insert(gameweekChips).values({
       id: chipId,
