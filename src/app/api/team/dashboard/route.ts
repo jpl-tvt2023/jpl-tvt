@@ -451,11 +451,16 @@ export async function GET(request: NextRequest) {
         })),
     };
 
-    // Check if captain is submitted for upcoming GW
-    let upcomingCaptainSubmitted = false;
+    // Check if captain is submitted for upcoming GW — return details for switching UI
+    let upcomingCaptain: { playerId: string; playerName: string } | null = null;
     if (nextGameweek) {
-      const upcomingCaptain = captainHistory.find(c => c.gameweek.id === nextGameweek.id);
-      upcomingCaptainSubmitted = !!upcomingCaptain;
+      const existingCaptain = captainHistory.find(c => c.gameweek.id === nextGameweek.id);
+      if (existingCaptain) {
+        upcomingCaptain = {
+          playerId: existingCaptain.player.id,
+          playerName: existingCaptain.player.name,
+        };
+      }
     }
     
     // Get upcoming chip submission for this team
@@ -636,7 +641,7 @@ export async function GET(request: NextRequest) {
       },
       serverTime: new Date().toISOString(),
       upcomingFixture,
-      upcomingCaptainSubmitted,
+      upcomingCaptain,
       upcomingChip,
       lastGwResult,
       minCompletedGw,
