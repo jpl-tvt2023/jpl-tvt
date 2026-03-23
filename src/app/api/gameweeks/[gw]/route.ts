@@ -151,8 +151,8 @@ async function autoAssignDefaultCaptain(
   scores: { playerId: string; playerName: string; points: number; transferHits: number; netScore: number }[],
   gameweekId: string,
   gameweekNumber: number
-): Promise<GameweekCaptain | null> {
-  if (team.players.length === 0) return null;
+): Promise<GameweekCaptain | undefined> {
+  if (team.players.length === 0) return undefined;
 
   // Find the lowest scorer (penalty for not announcing)
   const sorted = [...scores].sort((a, b) => a.netScore - b.netScore);
