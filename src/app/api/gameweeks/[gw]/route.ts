@@ -396,23 +396,56 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       try {
         // Get captain info for each team
         let homeCaptain = gameweek.captains.find(
+        let homeCaptain = gameweek.captains.find(
           (c: GameweekCaptain) => fixture.homeTeam.players.some((p: Player) => p.id === c.playerId)
         );
+        let awayCaptain = gameweek.captains.find(
         let awayCaptain = gameweek.captains.find(
           (c: GameweekCaptain) => fixture.awayTeam.players.some((p: Player) => p.id === c.playerId)
         );
 
         // Fetch FPL scores for all players (captain flag set after default assignment)
         const homeScoresRaw = await Promise.all(
+        // Fetch FPL scores for all players (captain flag set after default assignment)
+        const homeScoresRaw = await Promise.all(
           fixture.homeTeam.players.map(async (player: Player) => {
             const score = await calculateTeamGameweekScore(player.fplId, gameweekNumber);
+            return { playerId: player.id, playerName: player.name, ...score };
             return { playerId: player.id, playerName: player.name, ...score };
           })
         );
 
         const awayScoresRaw = await Promise.all(
+        const awayScoresRaw = await Promise.all(
           fixture.awayTeam.players.map(async (player: Player) => {
             const score = await calculateTeamGameweekScore(player.fplId, gameweekNumber);
+            return { playerId: player.id, playerName: player.name, ...score };
+          })
+        );
+
+        // Auto-assign default captain if none announced
+        // Penalty: the LOWEST scoring player becomes captain (doubling the lower score)
+        if (!homeCaptain) {
+          homeCaptain = await autoAssignDefaultCaptain(
+            fixture.homeTeam, homeScoresRaw, gameweek.id, gameweekNumber
+          );
+        }
+        if (!awayCaptain) {
+          awayCaptain = await autoAssignDefaultCaptain(
+            fixture.awayTeam, awayScoresRaw, gameweek.id, gameweekNumber
+          );
+        }
+
+        // Set isCaptain flag now that captains are resolved
+        const homeScores = homeScoresRaw.map(s => ({
+          ...s,
+          isCaptain: homeCaptain?.playerId === s.playerId,
+        }));
+
+        const awayScores = awayScoresRaw.map(s => ({
+          ...s,
+          isCaptain: awayCaptain?.playerId === s.playerId,
+        }));
             return { playerId: player.id, playerName: player.name, ...score };
           })
         );
@@ -445,6 +478,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         // so dashboard can display actual player-by-player score breakdowns
         if (homeCaptain) {
           const captainScore = homeScores.find(s => s.playerId === homeCaptain!.playerId);
+          const captainScore = homeScores.find(s => s.playerId === homeCaptain!.playerId);
           if (captainScore) {
             const doubled = (captainScore.points - captainScore.transferHits) * 2;
             await db.update(gameweekCaptains)
@@ -458,6 +492,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           }
         }
         if (awayCaptain) {
+          const captainScore = awayScores.find(s => s.playerId === awayCaptain!.playerId);
           const captainScore = awayScores.find(s => s.playerId === awayCaptain!.playerId);
           if (captainScore) {
             const doubled = (captainScore.points - captainScore.transferHits) * 2;
