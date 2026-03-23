@@ -46,14 +46,15 @@ export async function POST(request: NextRequest) {
           id: user.id,
           email: user.email,
           name: user.name,
-          isAdmin: true,
+          role: user.role,
+          isAdmin: true, // backward compat
           mustChangePassword: false,
         },
         redirectTo: "/admin",
       });
 
-      // Single signed session cookie — replaces userId/isAdmin cookies
-      const token = await createSession(user.id, "admin");
+      // Session type matches the user's role ("superadmin" or "admin")
+      const token = await createSession(user.id, user.role as "superadmin" | "admin");
       response.cookies.set(SESSION_COOKIE_NAME, token, SESSION_COOKIE_OPTIONS);
 
       return response;

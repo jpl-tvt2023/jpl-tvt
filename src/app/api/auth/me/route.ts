@@ -15,18 +15,19 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ authenticated: false }, { status: 200 });
     }
 
-    if (session.type === "admin") {
+    if (session.type === "admin" || session.type === "superadmin") {
       const userList = await db.select().from(users).where(eq(users.id, session.id));
       const user = userList[0];
       if (user) {
         return NextResponse.json({
           authenticated: true,
-          type: "admin",
+          type: session.type,
           user: {
             id: user.id,
             email: user.email,
             name: user.name,
-            isAdmin: user.isAdmin,
+            role: user.role,
+            isAdmin: true, // backward compat
           },
         });
       }
