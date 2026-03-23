@@ -117,6 +117,11 @@ export const results = sqliteTable("results", {
   // Chip usage
   homeUsedDoublePointer: integer("home_used_double_pointer", { mode: "boolean" }).notNull().default(false),
   awayUsedDoublePointer: integer("away_used_double_pointer", { mode: "boolean" }).notNull().default(false),
+
+  // Per-player score breakdown stored as JSON (populated when gameweek is processed)
+  // Shape: [{ name, fplId, fplScore, transferHits, isCaptain, finalScore }]
+  homePlayerScores: text("home_player_scores"),
+  awayPlayerScores: text("away_player_scores"),
   
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),

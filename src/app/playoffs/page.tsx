@@ -117,10 +117,12 @@ function MatchCard({
   tie, 
   compact, 
   liveScores,
+  isFreshlyRefreshed,
 }: { 
   tie: TieDisplay; 
   compact?: boolean; 
   liveScores?: LiveFixtureScore[];
+  isFreshlyRefreshed?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   const is2Leg = tie.gw2 !== null;
@@ -186,8 +188,12 @@ function MatchCard({
         <span>{tie.tieId} {is2Leg ? `(GW${tie.gw1}+${tie.gw2})` : `(GW${tie.gw1})`}</span>
         <div className="flex items-center gap-2">
           {showLive && (
-            <span className="text-green-400 flex items-center gap-1 normal-case">
-              <span className="h-1.5 w-1.5 rounded-full bg-green-400 animate-pulse"></span>
+            <span className={`flex items-center gap-1 normal-case ${
+              isFreshlyRefreshed ? "text-amber-400" : "text-gray-400"
+            }`}>
+              <span className={`h-1.5 w-1.5 rounded-full animate-pulse ${
+                isFreshlyRefreshed ? "bg-amber-400" : "bg-gray-400"
+              }`}></span>
               LIVE
             </span>
           )}
@@ -203,10 +209,10 @@ function MatchCard({
         {!isPlaceholder(tie.home) && (
           is2Leg ? (
             <div className="flex gap-2 text-xs tabular-nums">
-              <span className={`w-5 text-center ${showLiveLeg1 ? "text-green-400" : ""}`}>
+              <span className={`w-5 text-center ${showLiveLeg1 ? (isFreshlyRefreshed ? "text-amber-400 animate-pulse" : "text-white") : ""}`}>
                 {showLiveLeg1 ? getLiveScore(tie.home, liveScoreLeg1) ?? "–" : (tie.home?.leg1Score ?? "–")}
               </span>
-              <span className={`w-5 text-center ${showLiveLeg2 ? "text-green-400" : ""}`}>
+              <span className={`w-5 text-center ${showLiveLeg2 ? (isFreshlyRefreshed ? "text-amber-400 animate-pulse" : "text-white") : ""}`}>
                 {showLiveLeg2 ? getLiveScore(tie.home, liveScoreLeg2) ?? "–" : (tie.home?.leg2Score ?? "–")}
               </span>
               <span className="w-6 text-center font-bold border-l border-white/20 pl-1">
@@ -218,7 +224,7 @@ function MatchCard({
               </span>
             </div>
           ) : (
-            <span className={`text-xs tabular-nums w-5 text-center ${showLive ? "text-green-400" : ""}`}>
+            <span className={`text-xs tabular-nums w-5 text-center ${showLive ? (isFreshlyRefreshed ? "text-amber-400 animate-pulse" : "text-white") : ""}`}>
               {showLive ? getLiveScore(tie.home, liveScoreLeg1) ?? "–" : (tie.home?.leg1Score ?? "–")}
             </span>
           )
@@ -231,10 +237,10 @@ function MatchCard({
         {!isPlaceholder(tie.away) && (
           is2Leg ? (
             <div className="flex gap-2 text-xs tabular-nums">
-              <span className={`w-5 text-center ${showLiveLeg1 ? "text-green-400" : ""}`}>
+              <span className={`w-5 text-center ${showLiveLeg1 ? (isFreshlyRefreshed ? "text-amber-400 animate-pulse" : "text-white") : ""}`}>
                 {showLiveLeg1 ? getLiveScore(tie.away, liveScoreLeg1) ?? "–" : (tie.away?.leg1Score ?? "–")}
               </span>
-              <span className={`w-5 text-center ${showLiveLeg2 ? "text-green-400" : ""}`}>
+              <span className={`w-5 text-center ${showLiveLeg2 ? (isFreshlyRefreshed ? "text-amber-400 animate-pulse" : "text-white") : ""}`}>
                 {showLiveLeg2 ? getLiveScore(tie.away, liveScoreLeg2) ?? "–" : (tie.away?.leg2Score ?? "–")}
               </span>
               <span className="w-6 text-center font-bold border-l border-white/20 pl-1">
@@ -246,7 +252,7 @@ function MatchCard({
               </span>
             </div>
           ) : (
-            <span className={`text-xs tabular-nums w-5 text-center ${showLive ? "text-green-400" : ""}`}>
+            <span className={`text-xs tabular-nums w-5 text-center ${showLive ? (isFreshlyRefreshed ? "text-amber-400 animate-pulse" : "text-white") : ""}`}>
               {showLive ? getLiveScore(tie.away, liveScoreLeg1) ?? "–" : (tie.away?.leg1Score ?? "–")}
             </span>
           )
@@ -334,6 +340,8 @@ function RoundColumn({
   const roundGw = ties[0].gw1;
   const hasLiveData = mergedScores.some(s => s.gameweek === roundGw);
   const isRefreshing = refreshingGw === roundGw;
+  // Fresh = temp scores exist for this GW (user just refreshed)
+  const isFreshlyRefreshed = (tempLiveScores ? Object.keys(tempLiveScores).map(Number) : []).includes(roundGw);
   
   return (
     <div className={`flex flex-col gap-3 ${className || ""}`}>
@@ -356,6 +364,7 @@ function RoundColumn({
             key={tie.tieId} 
             tie={tie} 
             liveScores={mergedScores}
+            isFreshlyRefreshed={isFreshlyRefreshed}
           />
         ))}
       </div>

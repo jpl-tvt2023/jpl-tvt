@@ -624,6 +624,40 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           }
         }
 
+        // Build per-player score breakdown JSON for display on fixtures page
+        const homePlayerScores = JSON.stringify(
+          homeScores.map(s => {
+            const player = fixture.homeTeam.players.find((p: Player) => p.id === s.playerId);
+            const finalScore = s.isCaptain
+              ? (s.points - s.transferHits) * 2
+              : s.points - s.transferHits;
+            return {
+              name: s.playerName,
+              fplId: player?.fplId ?? "",
+              fplScore: s.points,
+              transferHits: s.transferHits,
+              isCaptain: s.isCaptain,
+              finalScore,
+            };
+          })
+        );
+        const awayPlayerScores = JSON.stringify(
+          awayScores.map((s: PlayerScoreData & { playerName: string }) => {
+            const player = fixture.awayTeam.players.find((p: Player) => p.id === s.playerId);
+            const finalScore = s.isCaptain
+              ? (s.points - s.transferHits) * 2
+              : s.points - s.transferHits;
+            return {
+              name: s.playerName,
+              fplId: player?.fplId ?? "",
+              fplScore: s.points,
+              transferHits: s.transferHits,
+              isCaptain: s.isCaptain,
+              finalScore,
+            };
+          })
+        );
+
         // Create result in database
         const resultId = generateId();
         await db.insert(results).values({
@@ -642,6 +676,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           awayGotBonus: false, // Will be updated in bonus calculation phase
           homeUsedDoublePointer: homeUsedDoublePointer,
           awayUsedDoublePointer: awayUsedDoublePointer,
+          homePlayerScores,
+          awayPlayerScores,
         });
 
         // Track margin for bonus calculation (only winning teams with 75+ margin)
