@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { fixtures, playoffTies, gameweeks, results, groups, challengerSurvivalEntries } from "@/lib/db/schema";
-import { eq, and, inArray } from "drizzle-orm";
+import { eq, and, inArray, sql } from "drizzle-orm";
 
 function getPlayoffsGroupId(): Promise<string | null> {
   return db.query.groups.findFirst({ where: eq(groups.name, "Playoffs") })
@@ -210,6 +210,55 @@ async function markLeg1Done(tieId: string) {
     .where(eq(playoffTies.tieId, tieId));
 }
 
+// Count persisted results for all fixtures in a given GW number
+async function countResultsForGw(gwNumber: number): Promise<number> {
+  const gwRow = await db.query.gameweeks.findFirst({ where: eq(gameweeks.number, gwNumber) });
+  if (!gwRow) return 0;
+  const rows = await db.select({ c: sql<number>`count(*)` })
+    .from(results)
+    .innerJoin(fixtures, eq(results.fixtureId, fixtures.id))
+    .where(eq(fixtures.gameweekId, gwRow.id));
+  return Number(rows[0]?.c ?? 0);
+}
+
+async function countTiesByRound(roundName: string): Promise<number> {
+  const rows = await db.select({ c: sql<number>`count(*)` })
+    .from(playoffTies)
+    .where(eq(playoffTies.roundName, roundName));
+  return Number(rows[0]?.c ?? 0);
+}
+
+async function hasAdvancedSurvivalEntries(): Promise<boolean> {
+  const gw33 = await db.query.gameweeks.findFirst({ where: eq(gameweeks.number, 33) });
+  if (!gw33) return false;
+  const rows = await db.select({ c: sql<number>`count(*)` })
+    .from(challengerSurvivalEntries)
+    .where(and(
+      eq(challengerSurvivalEntries.gameweekId, gw33.id),
+      eq(challengerSurvivalEntries.advanced, true),
+    ));
+  return Number(rows[0]?.c ?? 0) > 0;
+}
+
+// Verify the previous GW's advance actually ran by checking the DB artifacts it produces.
+async function checkPrerequisite(gwNumber: number): Promise<{ ok: true } | { ok: false; error: string }> {
+  const need = (prevGw: number, ok: boolean) => ok
+    ? { ok: true as const }
+    : { ok: false as const, error: `Advance GW${gwNumber} requires GW${prevGw} to be advanced first. Click 'Advance GW${prevGw}' on the Playoffs tab.` };
+
+  switch (gwNumber) {
+    case 31: return { ok: true };
+    case 32: return need(31, (await countTiesByRound("C-32")) > 0);
+    case 33: return need(32, (await countTiesByRound("QF")) > 0);
+    case 34: return need(33, await hasAdvancedSurvivalEntries());
+    case 35: return need(34, (await countTiesByRound("SF")) > 0);
+    case 36: return need(35, (await countTiesByRound("C-36")) > 0);
+    case 37: return need(36, (await countTiesByRound("C-37")) > 0);
+    case 38: return need(37, (await countTiesByRound("C-38")) > 0);
+    default: return { ok: true };
+  }
+}
+
 /**
  * POST /api/admin/advance-playoffs
  * Body: { gameweek: number }
@@ -225,6 +274,21 @@ export async function POST(request: NextRequest) {
   const gwNumber = body.gameweek as number;
   if (!gwNumber || gwNumber < 31 || gwNumber > 38) {
     return NextResponse.json({ error: "Gameweek must be between 31 and 38" }, { status: 400 });
+  }
+
+  // Precondition: scored results must exist for this GW, otherwise every resolver silently no-ops.
+  const resultCount = await countResultsForGw(gwNumber);
+  if (resultCount === 0) {
+    return NextResponse.json({
+      error: `No scored results for GW${gwNumber}. Run 'Process Scores' for GW${gwNumber} from the Scoring tab first.`,
+      code: "NO_RESULTS",
+    }, { status: 400 });
+  }
+
+  // Precondition: prior GW must have been advanced (enforces ordering).
+  const preReq = await checkPrerequisite(gwNumber);
+  if (!preReq.ok) {
+    return NextResponse.json({ error: preReq.error, code: "OUT_OF_ORDER" }, { status: 400 });
   }
 
   const playoffsGroupId = await getPlayoffsGroupId();
@@ -261,6 +325,13 @@ export async function POST(request: NextRequest) {
       case 38:
         await advanceGW38(actions);
         break;
+    }
+
+    if (actions.length === 0) {
+      return NextResponse.json({
+        error: `Advance GW${gwNumber} ran but produced no changes. Check that results are complete for all GW${gwNumber} fixtures.`,
+        code: "NO_CHANGES",
+      }, { status: 400 });
     }
 
     return NextResponse.json({ success: true, gameweek: gwNumber, actions });
