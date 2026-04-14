@@ -677,7 +677,7 @@ export default function PlayoffsPage() {
                   })}
 
                   {/* C-33 Survival */}
-                  {data.challenger.c33.length > 0 && (
+                  {(data.challenger.c33 as SurvivalDisplay[]).some(e => e.teamId) && (
                     <SurvivalTable entries={data.challenger.c33 as SurvivalDisplay[]} />
                   )}
 

@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls *.db)",
+      "Bash(sqlite3 tvt-league.db \".tables\")",
+      "Bash(node -e \"const Database = require\\('better-sqlite3'\\); const db = new Database\\('tvt-league.db', {readonly: true}\\); const tables = db.prepare\\(\\\\\"SELECT name FROM sqlite_master WHERE type='table'\\\\\"\\).all\\(\\); console.log\\(tables.map\\(t => t.name\\).join\\('\\\\n'\\)\\);\")",
+      "Bash(node -e ':*)"
+    ]
+  }
+}

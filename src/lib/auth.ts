@@ -47,12 +47,12 @@ function b64urlDecode(encoded: string): string {
 
 export interface SessionPayload {
   id: string;
-  type: "admin" | "team";
+  type: "superadmin" | "admin" | "team";
   exp: number;
 }
 
 /** Create a signed session token encoding id, type, and expiration. */
-export async function createSession(id: string, type: "admin" | "team"): Promise<string> {
+export async function createSession(id: string, type: "superadmin" | "admin" | "team"): Promise<string> {
   const exp = Math.floor(Date.now() / 1000) + SESSION_MAX_AGE;
   const payload = JSON.stringify({ id, type, exp });
   const encoded = b64urlEncode(payload);

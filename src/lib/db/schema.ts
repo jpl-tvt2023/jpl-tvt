@@ -11,9 +11,32 @@ export const users = sqliteTable("users", {
   email: text("email").notNull().unique(),
   password: text("password").notNull(),
   name: text("name").notNull(),
-  isAdmin: integer("is_admin", { mode: "boolean" }).notNull().default(false),
+  // "superadmin" = platform owner (full access); "admin" = league-scoped admin
+  role: text("role").notNull().default("admin"),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+// ============================================
+// Multi-League Infrastructure
+// ============================================
+
+export const leagues = sqliteTable("leagues", {
+  id: text("id").primaryKey(),
+  slug: text("slug").notNull().unique(), // e.g. "tvt-fpl", "tvt-cricket"
+  name: text("name").notNull(),
+  sport: text("sport").notNull(), // "fpl" | "cricket"
+  format: text("format").notNull(), // "tvt" | "classic" | "grand-prix" | "auction"
+  season: text("season").notNull(), // e.g. "2025-26"
+  isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+// Maps non-superadmin users to leagues they can administer
+export const leagueAdmins = sqliteTable("league_admins", {
+  id: text("id").primaryKey(),
+  leagueId: text("league_id").notNull().references(() => leagues.id),
+  userId: text("user_id").notNull().references(() => users.id),
 });
 
 // Group (A or B)
@@ -231,6 +254,21 @@ export const auditLogs = sqliteTable("audit_logs", {
 // Relations
 // ============================================
 
+export const leaguesRelations = relations(leagues, ({ many }) => ({
+  admins: many(leagueAdmins),
+}));
+
+export const leagueAdminsRelations = relations(leagueAdmins, ({ one }) => ({
+  league: one(leagues, {
+    fields: [leagueAdmins.leagueId],
+    references: [leagues.id],
+  }),
+  user: one(users, {
+    fields: [leagueAdmins.userId],
+    references: [users.id],
+  }),
+}));
+
 // Users are now admin-only, no team relation needed
 
 export const groupsRelations = relations(groups, ({ many }) => ({
@@ -395,3 +433,9 @@ export type AuditLog = typeof auditLogs.$inferSelect;
 export type NewAuditLog = typeof auditLogs.$inferInsert;
 
 export type Setting = typeof settings.$inferSelect;
+
+export type League = typeof leagues.$inferSelect;
+export type NewLeague = typeof leagues.$inferInsert;
+
+export type LeagueAdmin = typeof leagueAdmins.$inferSelect;
+export type NewLeagueAdmin = typeof leagueAdmins.$inferInsert;

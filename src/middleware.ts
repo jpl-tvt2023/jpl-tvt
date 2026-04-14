@@ -44,6 +44,7 @@ const PUBLIC_ROUTES = [
   "/api/fixtures",
   "/api/standings",
   "/api/playoffs/bracket",
+  "/api/leagues",
 ];
 
 function isPublicRoute(pathname: string, method: string): boolean {
@@ -140,9 +141,9 @@ export async function middleware(request: NextRequest) {
     return NextResponse.json({ error: "Invalid or expired session" }, { status: 401 });
   }
 
-  // Admin routes require admin session
+  // Admin routes require admin or superadmin session
   if (isAdminRoute(pathname, method)) {
-    if (session.type !== "admin") {
+    if (session.type !== "admin" && session.type !== "superadmin") {
       return NextResponse.json({ error: "Admin access required" }, { status: 403 });
     }
     // Forward verified session info as headers for route handlers
