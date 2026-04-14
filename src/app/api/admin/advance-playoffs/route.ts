@@ -240,6 +240,25 @@ async function hasAdvancedSurvivalEntries(): Promise<boolean> {
   return Number(rows[0]?.c ?? 0) > 0;
 }
 
+// Detect whether this GW has already been advanced — each advance creates specific downstream artifacts.
+// Returns the name of an artifact that already exists, or null if it's safe to run.
+async function alreadyAdvancedArtifact(gwNumber: number): Promise<string | null> {
+  switch (gwNumber) {
+    case 31: return (await countTiesByRound("C-32")) > 0 ? "C-32 ties" : null;
+    case 32: return (await countTiesByRound("QF")) > 0 ? "QF ties" : null;
+    case 33: return (await countTiesByRound("C-34")) > 0 ? "C-34 ties" : null;
+    case 34: return (await countTiesByRound("SF")) > 0 ? "SF ties" : null;
+    case 35: return (await countTiesByRound("C-36")) > 0 ? "C-36 ties" : null;
+    case 36: return (await countTiesByRound("C-37")) > 0 ? "C-37 ties" : null;
+    case 37: return (await countTiesByRound("C-38")) > 0 ? "C-38 ties" : null;
+    case 38: {
+      const finalTie = await getTie("Final");
+      return finalTie?.status === "complete" ? "Final result" : null;
+    }
+    default: return null;
+  }
+}
+
 // Verify the previous GW's advance actually ran by checking the DB artifacts it produces.
 async function checkPrerequisite(gwNumber: number): Promise<{ ok: true } | { ok: false; error: string }> {
   const need = (prevGw: number, ok: boolean) => ok
@@ -289,6 +308,15 @@ export async function POST(request: NextRequest) {
   const preReq = await checkPrerequisite(gwNumber);
   if (!preReq.ok) {
     return NextResponse.json({ error: preReq.error, code: "OUT_OF_ORDER" }, { status: 400 });
+  }
+
+  // Idempotency: refuse to re-run if this GW's downstream artifacts already exist.
+  const existing = await alreadyAdvancedArtifact(gwNumber);
+  if (existing) {
+    return NextResponse.json({
+      error: `GW${gwNumber} has already been advanced (${existing} exist). Nothing to do.`,
+      code: "ALREADY_ADVANCED",
+    }, { status: 400 });
   }
 
   const playoffsGroupId = await getPlayoffsGroupId();
