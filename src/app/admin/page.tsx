@@ -76,6 +76,7 @@ interface GameweekStatus {
   fixturesCount: number;
   resultsProcessed: number;
   isPending: boolean;
+  survival?: { total: number; ranked: number; advanced: number };
 }
 
 interface ScoringResult {
@@ -289,11 +290,15 @@ export default function AdminDashboard() {
         if (response.ok) {
           const data = await response.json();
           if (data.gameweek && data.gameweek.fixturesCount > 0) {
+            const survival = data.gameweek.survival as GameweekStatus["survival"];
+            const fixturesPending = data.gameweek.resultsProcessed < data.gameweek.fixturesCount;
+            const survivalPending = !!(survival && survival.total > 0 && survival.ranked < survival.total);
             statuses.push({
               number: data.gameweek.number,
               fixturesCount: data.gameweek.fixturesCount,
               resultsProcessed: data.gameweek.resultsProcessed,
-              isPending: data.gameweek.resultsProcessed < data.gameweek.fixturesCount,
+              isPending: fixturesPending || survivalPending,
+              survival,
             });
           }
         } else if (response.status === 404) {
@@ -2335,6 +2340,11 @@ export default function AdminDashboard() {
                         <div className={`text-xs ${gw.isPending ? "text-yellow-500" : "text-green-500"}`}>
                           {gw.resultsProcessed}/{gw.fixturesCount}
                         </div>
+                        {gw.survival && gw.survival.total > 0 && (
+                          <div className={`text-[10px] ${gw.survival.ranked < gw.survival.total ? "text-yellow-500" : "text-green-500"}`}>
+                            Survival {gw.survival.ranked}/{gw.survival.total}
+                          </div>
+                        )}
                         {gw.isPending ? (
                           <button
                             onClick={() => processGameweek(gw.number)}

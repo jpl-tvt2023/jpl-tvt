@@ -461,70 +461,26 @@ async function advanceGW32(groupId: string, actions: string[]) {
   }
 }
 
-async function advanceGW33(groupId: string, actions: string[]) {
-  // Mark QF ties as leg1_done
+async function advanceGW33(_groupId: string, actions: string[]) {
   for (const suffix of ["A", "B", "C", "D"]) {
     await markLeg1Done(`QF-${suffix}`);
     actions.push(`QF-${suffix}: leg 1 recorded`);
   }
 
-  // Resolve Challenger Survival: read each team's GW33 score from results
   const gw33 = await db.query.gameweeks.findFirst({ where: eq(gameweeks.number, 33) });
   if (!gw33) throw new Error("GW33 not found");
 
-  const survivalEntries = await db.select().from(challengerSurvivalEntries)
-    .where(eq(challengerSurvivalEntries.gameweekId, gw33.id));
-
-  // For each survival team, find their GW33 score from any playoff fixture result
-  // Survival teams don't have head-to-head fixtures in GW33, so get score from their QF fixture if they're in QF,
-  // or we need another approach. Actually per the rules, GW33 survival = individual FPL team score for that GW.
-  // The survival team's "score" is their TVT team score for GW33 from the FPL cache.
-  // Since these teams are not in QF fixtures, we need to compute their score differently.
-  // For now: the admin should update survival scores via the advance endpoint after GW33 is processed.
-  // We'll read their scores from QF fixture results (they may appear as home/away in QF fixtures if they made it)
-  // OR from a dedicated scoring mechanism.
-  
-  // Actually: survival teams DON'T play any fixture in GW33. Their score = combined FPL score of their 2 players.
-  // We should compute this from FPL cache. Let's use getAllCachedScores.
-  
-  // Import dynamically to avoid circular deps
-  const { getAllCachedScores } = await import("@/lib/fpl-cache");
-  const { players: playersTable } = await import("@/lib/db/schema");
-  
-  const gw33Cache = await getAllCachedScores(33);
-  
-  // For each survival team, get their players' FPL scores
-  for (const entry of survivalEntries) {
-    const teamPlayers = await db.select().from(playersTable)
-      .where(eq(playersTable.teamId, entry.teamId));
-    
-    let teamScore = 0;
-    for (const player of teamPlayers) {
-      const cacheKey = `${player.fplId}_gw33`;
-      const cached = gw33Cache[cacheKey];
-      if (cached) {
-        teamScore += cached.netScore;
-      }
-    }
-
-    await db.update(challengerSurvivalEntries)
-      .set({ score: teamScore })
-      .where(eq(challengerSurvivalEntries.id, entry.id));
+  const rankedRow = await db.select({ c: sql<number>`count(*)` })
+    .from(challengerSurvivalEntries)
+    .where(and(
+      eq(challengerSurvivalEntries.gameweekId, gw33.id),
+      sql`${challengerSurvivalEntries.rank} IS NOT NULL`,
+    ));
+  const ranked = Number(rankedRow[0]?.c ?? 0);
+  if (ranked === 0) {
+    throw new Error("Challenger Survival has not been processed for GW33. Run Process GW33 from the Scoring tab first.");
   }
-
-  // Re-read, rank, and mark top 8 as advanced
-  const updatedEntries = await db.select().from(challengerSurvivalEntries)
-    .where(eq(challengerSurvivalEntries.gameweekId, gw33.id));
-  
-  updatedEntries.sort((a, b) => b.score - a.score);
-  
-  for (let i = 0; i < updatedEntries.length; i++) {
-    const advanced = i < 8;
-    await db.update(challengerSurvivalEntries)
-      .set({ rank: i + 1, advanced })
-      .where(eq(challengerSurvivalEntries.id, updatedEntries[i].id));
-  }
-  actions.push(`Ranked ${updatedEntries.length} survival teams, top 8 advance`);
+  actions.push(`Survival already processed (${ranked} entries ranked)`);
 }
 
 async function advanceGW34(groupId: string, actions: string[]) {
