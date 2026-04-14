@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, gameweeks, fixtures, teams, players, groups, results, gameweekCaptains, gameweekChips, auditLogs, type Gameweek, type Fixture, type Team, type Player, type Group, type Result, type GameweekCaptain, type GameweekChip } from "@/lib/db";
+import { challengerSurvivalEntries } from "@/lib/db/schema";
 import { calculateTeamGameweekScore } from "@/lib/fpl";
 import { calculateTVTTeamScore, determineMatchResult } from "@/lib/scoring";
 import { getTop2FromGroup } from "@/lib/chip-validation";
 import { getAllCachedScores } from "@/lib/fpl-cache";
-import { eq, and, isNull } from "drizzle-orm";
+import { eq, and, isNull, isNotNull, sql } from "drizzle-orm";
 import { generateId } from "@/lib/id";
 
 interface RouteParams {
@@ -86,6 +87,30 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       );
     }
 
+    let survival: { total: number; ranked: number; advanced: number } | undefined;
+    if (gameweekNumber === 33) {
+      const totalRow = await db.select({ c: sql<number>`count(*)` })
+        .from(challengerSurvivalEntries)
+        .where(eq(challengerSurvivalEntries.gameweekId, gameweek.id));
+      const rankedRow = await db.select({ c: sql<number>`count(*)` })
+        .from(challengerSurvivalEntries)
+        .where(and(
+          eq(challengerSurvivalEntries.gameweekId, gameweek.id),
+          isNotNull(challengerSurvivalEntries.rank),
+        ));
+      const advancedRow = await db.select({ c: sql<number>`count(*)` })
+        .from(challengerSurvivalEntries)
+        .where(and(
+          eq(challengerSurvivalEntries.gameweekId, gameweek.id),
+          eq(challengerSurvivalEntries.advanced, true),
+        ));
+      survival = {
+        total: Number(totalRow[0]?.c ?? 0),
+        ranked: Number(rankedRow[0]?.c ?? 0),
+        advanced: Number(advancedRow[0]?.c ?? 0),
+      };
+    }
+
     return NextResponse.json({
       gameweek: {
         number: gameweek.number,
@@ -93,6 +118,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         isPlayoffs: gameweek.isPlayoffs,
         fixturesCount: gameweek.fixtures.length,
         resultsProcessed: gameweek.fixtures.filter((f: FixtureWithRelations) => f.result).length,
+        survival,
       },
       fixtures: gameweek.fixtures.map((f: FixtureWithRelations) => ({
         id: f.id,
@@ -211,6 +237,49 @@ async function autoAssignDefaultCaptain(
     createdAt: new Date(),
     updatedAt: new Date(),
   } as GameweekCaptain;
+}
+
+/**
+ * Process Challenger Survival round for GW33: read each survival team's
+ * GW33 FPL score from cache, persist scores, then rank — top 8 advance.
+ * Returns counts for the API response.
+ */
+async function processChallengerSurvival(
+  gw33Id: string,
+  gwNumber: number,
+): Promise<{ ranked: number; advanced: number }> {
+  const entries = await db.select().from(challengerSurvivalEntries)
+    .where(eq(challengerSurvivalEntries.gameweekId, gw33Id));
+  if (entries.length === 0) return { ranked: 0, advanced: 0 };
+
+  const cache = await getAllCachedScores(gwNumber);
+  if (Object.keys(cache).length === 0) {
+    throw new Error(`FPL cache for GW${gwNumber} is empty — survival cannot be ranked. Warm the cache and reprocess.`);
+  }
+
+  for (const entry of entries) {
+    const teamPlayers = await db.select().from(players)
+      .where(eq(players.teamId, entry.teamId));
+    let teamScore = 0;
+    for (const p of teamPlayers) {
+      const cached = cache[`${p.fplId}_gw${gwNumber}`];
+      if (cached) teamScore += cached.netScore;
+    }
+    await db.update(challengerSurvivalEntries)
+      .set({ score: teamScore })
+      .where(eq(challengerSurvivalEntries.id, entry.id));
+  }
+
+  const ranked = (await db.select().from(challengerSurvivalEntries)
+    .where(eq(challengerSurvivalEntries.gameweekId, gw33Id)))
+    .sort((a, b) => b.score - a.score);
+
+  for (let i = 0; i < ranked.length; i++) {
+    await db.update(challengerSurvivalEntries)
+      .set({ rank: i + 1, advanced: i < 8 })
+      .where(eq(challengerSurvivalEntries.id, ranked[i].id));
+  }
+  return { ranked: ranked.length, advanced: Math.min(8, ranked.length) };
 }
 
 /**
@@ -355,12 +424,18 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       if (updatedGameweek) {
         gameweek.fixtures = updatedGameweek.fixtures;
       }
+
+      if (gameweekNumber === 33) {
+        await db.update(challengerSurvivalEntries)
+          .set({ score: 0, rank: null, advanced: false })
+          .where(eq(challengerSurvivalEntries.gameweekId, gameweek.id));
+      }
     }
 
     // Filter only unprocessed fixtures
     const unprocessedFixtures = gameweek.fixtures.filter(f => !f.result);
 
-    if (unprocessedFixtures.length === 0) {
+    if (unprocessedFixtures.length === 0 && gameweekNumber !== 33) {
       return NextResponse.json(
         { message: "All fixtures already processed", processed: 0 },
         { status: 200 }
@@ -1029,6 +1104,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       }
     }
 
+    let survivalProcessed: { ranked: number; advanced: number } | undefined;
+    if (gameweekNumber === 33) {
+      survivalProcessed = await processChallengerSurvival(gameweek.id, gameweekNumber);
+    }
+
     return NextResponse.json({
       success: true,
       gameweek: gameweekNumber,
@@ -1039,6 +1119,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       challengeResults: challengeResults.length > 0 ? challengeResults : undefined,
       errors: errors.length > 0 ? errors : undefined,
       challengeErrors: challengeErrors.length > 0 ? challengeErrors : undefined,
+      survival: survivalProcessed,
     });
   } catch (error) {
     console.error("Error processing gameweek:", error);
