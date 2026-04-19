@@ -31,11 +31,6 @@ interface SurvivalDisplay {
  */
 export async function GET(request: NextRequest) {
   try {
-    const sessionType = request.headers.get("x-session-type");
-    if (sessionType !== "admin" && sessionType !== "superadmin") {
-      return NextResponse.json({ error: "Admin access required" }, { status: 403 });
-    }
-
     const { searchParams } = new URL(request.url);
     const gwParam = searchParams.get("gameweek");
     const gwNumber = gwParam ? parseInt(gwParam) : 33;
