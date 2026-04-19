@@ -3,6 +3,30 @@
 
 import { calculateTeamGameweekScore } from "./fpl";
 
+export interface PlayerWithNetScore {
+  id: string;
+  name: string;
+  netScore: number;
+}
+
+// Auto-captain rule: when no captain is announced, the lowest-scoring player
+// is treated as captain (their score gets doubled — a penalty for not
+// announcing). Tiebreak on identical netScore: previous-GW captain for this
+// team, else first alphabetical.
+export function pickLowestScorerAsCaptain(
+  players: PlayerWithNetScore[],
+  opts?: { previousCaptainPlayerId?: string | null }
+): string | undefined {
+  if (players.length === 0) return undefined;
+  const sorted = [...players].sort((a, b) => a.netScore - b.netScore);
+  if (sorted.length >= 2 && sorted[0].netScore === sorted[1].netScore) {
+    const prev = opts?.previousCaptainPlayerId;
+    if (prev && players.some(p => p.id === prev)) return prev;
+    return [...players].sort((a, b) => a.name.localeCompare(b.name))[0].id;
+  }
+  return sorted[0].id;
+}
+
 export interface PlayerScore {
   fplScore: number;
   transferHits: number;

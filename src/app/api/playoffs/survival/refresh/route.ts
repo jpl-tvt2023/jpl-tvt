@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { gameweeks, challengerSurvivalEntries, gameweekCaptains, players, teams } from "@/lib/db/schema";
 import { eq, inArray } from "drizzle-orm";
 import { fetchTeamGameweekPicks } from "@/lib/fpl";
+import { pickLowestScorerAsCaptain } from "@/lib/scoring";
 
 interface PlayerScore {
   name: string;
@@ -70,32 +71,42 @@ export async function GET(request: NextRequest) {
     const result: SurvivalDisplay[] = [];
     for (const entry of entries) {
       const teamPlayers = playersByTeamId.get(entry.teamId) ?? [];
-      const captainPlayerId = captainByTeam.get(entry.teamId);
-      const breakdown: PlayerScore[] = [];
-      let total = 0;
+      const announcedCaptainId = captainByTeam.get(entry.teamId);
 
-      for (const p of teamPlayers) {
-        let fplScore = 0;
-        let transferHits = 0;
+      // Pass 1: fetch per-player net scores.
+      const fetched = await Promise.all(teamPlayers.map(async (p) => {
         try {
           const picks = await fetchTeamGameweekPicks(p.fplId, gwNumber);
-          fplScore = picks.entry_history.points;
-          transferHits = picks.entry_history.event_transfers_cost;
+          return { p, fplScore: picks.entry_history.points, transferHits: picks.entry_history.event_transfers_cost, ok: true as const };
         } catch (err) {
           console.error(`Live FPL fetch failed for fplId ${p.fplId} GW${gwNumber}:`, err);
+          return { p, fplScore: 0, transferHits: 0, ok: false as const };
         }
-        const isCaptain = captainPlayerId === p.id;
-        const finalScore = fplScore - transferHits; // no captain doubling for survival
-        total += finalScore;
-        breakdown.push({
+      }));
+
+      // Auto-captain: lowest net scorer when nothing announced.
+      const effectiveCaptainId = announcedCaptainId ?? pickLowestScorerAsCaptain(
+        fetched.filter(f => f.ok).map(f => ({
+          id: f.p.id,
+          name: f.p.name,
+          netScore: f.fplScore - f.transferHits,
+        }))
+      );
+
+      const breakdown: PlayerScore[] = fetched.map(({ p, fplScore, transferHits, ok }) => {
+        if (!ok) return { name: p.name, fplId: p.fplId, fplScore: 0, transferHits: 0, isCaptain: false, finalScore: 0 };
+        const isCaptain = effectiveCaptainId === p.id;
+        const net = fplScore - transferHits;
+        return {
           name: p.name,
           fplId: p.fplId,
           fplScore,
           transferHits,
           isCaptain,
-          finalScore,
-        });
-      }
+          finalScore: isCaptain ? net * 2 : net,
+        };
+      });
+      const total = breakdown.reduce((s, b) => s + b.finalScore, 0);
 
       const info = teamInfoById.get(entry.teamId);
       result.push({

@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { playoffTies, challengerSurvivalEntries, fixtures, results, gameweeks, teams, groups, gameweekCaptains, players } from "@/lib/db/schema";
 import { eq, and, desc, sql, inArray } from "drizzle-orm";
 import { fetchTeamGameweekPicks, detectLiveGameweek } from "@/lib/fpl";
+import { pickLowestScorerAsCaptain } from "@/lib/scoring";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -390,50 +391,51 @@ async function fetchAndCacheLiveScoresForGw(gameweek: number): Promise<void> {
 async function calculateLiveTeamScore(
   teamPlayers: { id: string; name: string; fplId: string }[],
   captainPlayerId: string | undefined,
-  gameweek: number,
-  opts: { doubleCaptain?: boolean } = {}
+  gameweek: number
 ): Promise<{
   total: number;
   players: { name: string; fplId: string; fplScore: number; transferHits: number; isCaptain: boolean; finalScore: number }[];
 }> {
-  const playerScores = [];
-  let total = 0;
+  // Pass 1: fetch per-player net scores so we can pick an auto-captain if none announced.
+  const fetched = await Promise.all(
+    teamPlayers.map(async (player) => {
+      try {
+        const picks = await fetchTeamGameweekPicks(player.fplId, gameweek);
+        const fplScore = picks.entry_history.points;
+        const transferHits = picks.entry_history.event_transfers_cost;
+        return { player, fplScore, transferHits, ok: true as const };
+      } catch (err) {
+        console.error(`Failed to fetch FPL data for player ${player.fplId} in GW${gameweek}:`, err);
+        return { player, fplScore: 0, transferHits: 0, ok: false as const };
+      }
+    })
+  );
 
-  for (const player of teamPlayers) {
-    try {
-      // Fetch from FPL API - always fresh data
-      const picks = await fetchTeamGameweekPicks(player.fplId, gameweek);
-      const fplScore = picks.entry_history.points;
-      const transferHits = picks.entry_history.event_transfers_cost;
-      const netScore = fplScore - transferHits;
-      const isCaptain = captainPlayerId === player.id;
-      const doubleCaptain = opts.doubleCaptain !== false; // default true for h2h
-      const finalScore = isCaptain && doubleCaptain ? netScore * 2 : netScore;
+  const effectiveCaptainId = captainPlayerId ?? pickLowestScorerAsCaptain(
+    fetched.filter(f => f.ok).map(f => ({
+      id: f.player.id,
+      name: f.player.name,
+      netScore: f.fplScore - f.transferHits,
+    }))
+  );
 
-      playerScores.push({
-        name: player.name,
-        fplId: player.fplId,
-        fplScore,
-        transferHits,
-        isCaptain,
-        finalScore,
-      });
-
-      total += finalScore;
-    } catch (err) {
-      console.error(`Failed to fetch FPL data for player ${player.fplId} in GW${gameweek}:`, err);
-      // Use 0 for this player
-      playerScores.push({
-        name: player.name,
-        fplId: player.fplId,
-        fplScore: 0,
-        transferHits: 0,
-        isCaptain: false,
-        finalScore: 0,
-      });
+  const playerScores = fetched.map(({ player, fplScore, transferHits, ok }) => {
+    if (!ok) {
+      return { name: player.name, fplId: player.fplId, fplScore: 0, transferHits: 0, isCaptain: false, finalScore: 0 };
     }
-  }
+    const net = fplScore - transferHits;
+    const isCaptain = effectiveCaptainId === player.id;
+    return {
+      name: player.name,
+      fplId: player.fplId,
+      fplScore,
+      transferHits,
+      isCaptain,
+      finalScore: isCaptain ? net * 2 : net,
+    };
+  });
 
+  const total = playerScores.reduce((s, p) => s + p.finalScore, 0);
   return { total, players: playerScores };
 }
 
@@ -776,7 +778,7 @@ async function buildLiveBracket(latestCompletedGw: number) {
         const teamPlayers = playersByTeamId.get(e.teamId) ?? [];
         const captainPlayerId = captainPickByTeamId.get(e.teamId)?.playerId;
         try {
-          const { total, players: livePlayers } = await calculateLiveTeamScore(teamPlayers, captainPlayerId, 33, { doubleCaptain: false });
+          const { total, players: livePlayers } = await calculateLiveTeamScore(teamPlayers, captainPlayerId, 33);
           liveDataByTeamId.set(e.teamId, { total, players: livePlayers });
         } catch (err) {
           console.error(`Survival live-score fetch failed for team ${e.teamId}:`, err);

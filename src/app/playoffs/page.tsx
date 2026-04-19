@@ -477,7 +477,6 @@ function SurvivalTable({
                           label={`${e.abbr} Players`}
                           players={e.players!}
                           gameweek={33}
-                          doubleCaptain={false}
                         />
                       </td>
                     </tr>

@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { fixtures, gameweeks, gameweekCaptains } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { fetchTeamGameweekPicks, fetchLiveGameweek } from "@/lib/fpl";
+import { pickLowestScorerAsCaptain } from "@/lib/scoring";
 import type { LiveFixtureScore, LiveGameweekData } from "@/lib/fpl-cache";
 
 /**
@@ -128,80 +129,53 @@ async function calculateLiveTeamScore(
   const liveData = await fetchLiveGameweek(gameweek);
   const liveElementsMap = new Map(liveData.elements.map((e) => [e.id, e]));
 
-  const playerScores = [];
-  let total = 0;
-
-  for (const player of teamPlayers) {
+  // Pass 1: compute each player's net FPL score (with VC activation logic intact).
+  const fetched = await Promise.all(teamPlayers.map(async (player) => {
     try {
-      // Fetch picks for this FPL team to see which 15 FPL players they own
       const picks = await fetchTeamGameweekPicks(player.fplId, gameweek);
-      
-      // Get transfer cost
       const transferHits = picks.entry_history.event_transfers_cost;
-      
-      // Determine effective multipliers with proper VC activation
-      // FPL multiplier values: 0 = bench, 1 = starting, 2 = captain, 3 = triple captain
+
       const captainPick = picks.picks.find((p) => p.is_captain);
-      const viceCaptainPick = picks.picks.find((p) => p.is_vice_captain);
-      
-      // Check if captain actually played (has minutes > 0)
       const captainLive = captainPick ? liveElementsMap.get(captainPick.element) : null;
       const captainPlayed = captainLive ? captainLive.stats.minutes > 0 : false;
-      
-      // Calculate total from live FPL player scores using multiplier
+
       let teamScore = 0;
-      
       for (const pick of picks.picks) {
         const liveElement = liveElementsMap.get(pick.element);
         if (!liveElement) continue;
-        
         let multiplier = pick.multiplier;
-        
-        // Handle VC activation: if captain didn't play, VC gets captain's multiplier
         if (!captainPlayed) {
-          if (pick.is_captain) {
-            multiplier = 0; // Captain didn't play, gets 0
-          } else if (pick.is_vice_captain) {
-            // VC inherits captain multiplier (2 normally, 3 for triple captain)
-            multiplier = captainPick?.multiplier ?? 2;
-          }
+          if (pick.is_captain) multiplier = 0;
+          else if (pick.is_vice_captain) multiplier = captainPick?.multiplier ?? 2;
         }
-        
-        // Only count players with multiplier > 0 (excludes bench unless bench boost)
-        if (multiplier > 0) {
-          teamScore += liveElement.stats.total_points * multiplier;
-        }
+        if (multiplier > 0) teamScore += liveElement.stats.total_points * multiplier;
       }
-      
-      // Deduct transfer hits
+
       const netScore = teamScore - transferHits;
-      
-      // Apply TVT captain doubling (separate from FPL captaincy)
-      const isCaptain = captainPlayerId === player.id;
-      const finalScore = isCaptain ? netScore * 2 : netScore;
-
-      playerScores.push({
-        name: player.name,
-        fplId: player.fplId,
-        fplScore: netScore, // Net FPL score after transfer hits
-        transferHits,
-        isCaptain,
-        finalScore,
-      });
-
-      total += finalScore;
+      return { player, netScore, transferHits, ok: true as const };
     } catch (err) {
       console.error(`Failed to fetch live FPL data for team ${player.fplId} in GW${gameweek}:`, err);
-      playerScores.push({
-        name: player.name,
-        fplId: player.fplId,
-        fplScore: 0,
-        transferHits: 0,
-        isCaptain: false,
-        finalScore: 0,
-      });
+      return { player, netScore: 0, transferHits: 0, ok: false as const };
     }
-  }
+  }));
+
+  const effectiveCaptainId = captainPlayerId ?? pickLowestScorerAsCaptain(
+    fetched.filter(f => f.ok).map(f => ({ id: f.player.id, name: f.player.name, netScore: f.netScore }))
+  );
+
+  const playerScores = fetched.map(({ player, netScore, transferHits, ok }) => {
+    if (!ok) return { name: player.name, fplId: player.fplId, fplScore: 0, transferHits: 0, isCaptain: false, finalScore: 0 };
+    const isCaptain = effectiveCaptainId === player.id;
+    return {
+      name: player.name,
+      fplId: player.fplId,
+      fplScore: netScore, // Net FPL score after transfer hits (matches original field meaning)
+      transferHits,
+      isCaptain,
+      finalScore: isCaptain ? netScore * 2 : netScore,
+    };
+  });
+  const total = playerScores.reduce((s, p) => s + p.finalScore, 0);
 
   return { total, players: playerScores };
 }
