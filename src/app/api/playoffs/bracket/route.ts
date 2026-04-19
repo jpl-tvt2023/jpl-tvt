@@ -3,6 +3,9 @@ import { db } from "@/lib/db";
 import { playoffTies, challengerSurvivalEntries, fixtures, results, gameweeks, teams, groups, gameweekCaptains, players } from "@/lib/db/schema";
 import { eq, and, desc, sql, inArray } from "drizzle-orm";
 import { fetchTeamGameweekPicks, detectLiveGameweek } from "@/lib/fpl";
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 import { getLiveCachedScores } from "@/lib/fpl-cache";
 
 // Seeding tables (same as generate-playoffs)

@@ -429,10 +429,9 @@ function SurvivalTable({
         <table className="w-full text-sm">
           <thead>
             <tr className="text-gray-400 text-xs border-b border-white/10">
-              <th className="text-left px-3 py-2 w-10">#</th>
-              <th className="text-left px-3 py-2">Team</th>
-              <th className="text-right px-3 py-2">Score</th>
-              <th className="text-center px-3 py-2 w-16">Status</th>
+              <th className="text-left px-3 py-1.5 w-10">#</th>
+              <th className="text-left px-3 py-1.5">Team</th>
+              <th className="text-right px-3 py-1.5">Score</th>
             </tr>
           </thead>
           <tbody>
@@ -445,27 +444,26 @@ function SurvivalTable({
                     className={`border-b border-white/5 ${e.advanced ? "bg-green-900/20" : i >= 8 ? "bg-red-900/10" : ""} ${hasPlayers ? "cursor-pointer hover:bg-slate-700/50 transition-colors" : ""}`}
                     onClick={hasPlayers ? () => setExpandedTeam(isExpanded ? null : e.teamId) : undefined}
                   >
-                    <td className="px-3 py-2 text-gray-400">{e.rank ?? i + 1}</td>
-                    <td className={`px-3 py-2 ${e.advanced ? "text-green-400 font-semibold" : "text-white"}`}>{e.abbr}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-white">{e.score || "–"}</td>
-                    <td className="px-3 py-2 text-center">
-                      <div className="flex items-center justify-center gap-1">
-                        {e.advanced ? (
-                          <span className="text-green-400 text-xs">✓</span>
-                        ) : e.rank && e.rank > 8 ? (
-                          <span className="text-red-400 text-xs">✗</span>
-                        ) : (
-                          <span className="text-gray-500 text-xs">—</span>
-                        )}
+                    <td className="px-3 py-1.5 text-gray-400">{e.rank ?? i + 1}</td>
+                    <td className={`px-3 py-1.5 ${e.advanced ? "text-green-400 font-semibold" : "text-white"}`}>
+                      <span className="flex items-center gap-1.5">
+                        {e.abbr}
+                        {e.advanced && <span className="text-green-400 text-xs">✓</span>}
+                        {!e.advanced && e.rank && e.rank > 8 && <span className="text-red-400 text-xs">✗</span>}
+                      </span>
+                    </td>
+                    <td className="px-3 py-1.5 text-right tabular-nums text-white">
+                      <span className="inline-flex items-center gap-2 justify-end">
+                        {e.score || "–"}
                         {hasPlayers && (
                           <span className="text-gray-500 text-[10px]">{isExpanded ? "▲" : "▼"}</span>
                         )}
-                      </div>
+                      </span>
                     </td>
                   </tr>
                   {isExpanded && (
                     <tr className="border-b border-white/5 bg-slate-900/60">
-                      <td colSpan={4} className="px-3 py-2">
+                      <td colSpan={3} className="px-3 py-2">
                         <PlayerBreakdown
                           label={`${e.abbr} Players`}
                           players={e.players!}
@@ -570,7 +568,7 @@ export default function PlayoffsPage() {
         console.error("Live refresh failed:", err);
       }
       try {
-        const bracketRes = await fetch("/api/playoffs/bracket");
+        const bracketRes = await fetch(`/api/playoffs/bracket?t=${Date.now()}`, { cache: "no-store" });
         if (bracketRes.ok) setData(await bracketRes.json());
       } catch (err) {
         console.error("Bracket refresh failed:", err);
