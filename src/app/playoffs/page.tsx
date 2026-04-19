@@ -445,18 +445,20 @@ function SurvivalTable({
             {entries.map((e, i) => {
               const hasPlayers = (e.players?.length ?? 0) > 0;
               const isExpanded = hasPlayers && expandedTeam === e.teamId;
+              const advances = i < 8;
+              const eliminated = i >= entries.length - 3;
               return (
                 <Fragment key={e.teamId || `placeholder-${i}`}>
                   <tr
-                    className={`border-b border-white/5 ${e.advanced ? "bg-green-900/20" : i >= 8 ? "bg-red-900/10" : ""} ${hasPlayers ? "cursor-pointer hover:bg-slate-700/50 transition-colors" : ""}`}
+                    className={`border-b border-white/5 ${advances ? "bg-green-900/20" : eliminated ? "bg-red-900/10" : ""} ${hasPlayers ? "cursor-pointer hover:bg-slate-700/50 transition-colors" : ""}`}
                     onClick={hasPlayers ? () => setExpandedTeam(isExpanded ? null : e.teamId) : undefined}
                   >
-                    <td className="px-3 py-1.5 text-gray-400">{e.rank ?? i + 1}</td>
-                    <td className={`px-3 py-1.5 ${e.advanced ? "text-green-400 font-semibold" : "text-white"}`}>
+                    <td className="px-3 py-1.5 text-gray-400">{i + 1}</td>
+                    <td className={`px-3 py-1.5 ${advances ? "text-green-400 font-semibold" : "text-white"}`}>
                       <span className="flex items-center gap-1.5">
                         {e.abbr}
-                        {e.advanced && <span className="text-green-400 text-xs">✓</span>}
-                        {!e.advanced && e.rank && e.rank > 8 && <span className="text-red-400 text-xs">✗</span>}
+                        {advances && <span className="text-green-400 text-xs">✓</span>}
+                        {eliminated && <span className="text-red-400 text-xs">✗</span>}
                       </span>
                     </td>
                     <td className="px-3 py-1.5 text-right tabular-nums text-white">
