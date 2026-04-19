@@ -372,12 +372,18 @@ function RoundColumn({
   );
 }
 
-function SurvivalTable({ entries }: { entries: SurvivalDisplay[] }) {
+function SurvivalTable({ entries, isLive }: { entries: SurvivalDisplay[]; isLive: boolean }) {
   if (entries.length === 0) return null;
   return (
     <div>
-      <h3 className="text-xs font-bold text-yellow-400 uppercase tracking-wider mb-2">
-        C-33 Survival (GW33) — Top 8 Advance
+      <h3 className="text-xs font-bold text-yellow-400 uppercase tracking-wider mb-2 flex items-center gap-2">
+        <span>C-33 Survival (GW33) — Top 8 Advance</span>
+        {isLive && (
+          <span className="flex items-center gap-1 normal-case text-gray-400 font-normal">
+            <span className="h-1.5 w-1.5 rounded-full animate-pulse bg-gray-400"></span>
+            LIVE
+          </span>
+        )}
       </h3>
       <div className="bg-slate-800/80 border border-white/10 rounded-lg overflow-hidden">
         <div className="overflow-x-auto">
@@ -678,7 +684,13 @@ export default function PlayoffsPage() {
 
                   {/* C-33 Survival */}
                   {(data.challenger.c33 as SurvivalDisplay[]).some(e => e.teamId) && (
-                    <SurvivalTable entries={data.challenger.c33 as SurvivalDisplay[]} />
+                    <SurvivalTable
+                      entries={data.challenger.c33 as SurvivalDisplay[]}
+                      isLive={
+                        (data.challenger.c33 as SurvivalDisplay[]).some((e) => e.rank === null) &&
+                        (data.challenger.c33 as SurvivalDisplay[]).some((e) => (e.score ?? 0) > 0)
+                      }
+                    />
                   )}
 
                   {/* C-34 through C-38 */}
