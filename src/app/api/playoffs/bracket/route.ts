@@ -225,11 +225,20 @@ async function getFinishedGwScoresFromDb(gameweek: number): Promise<any[]> {
   }
 
   // Helper to build player breakdown for a team side
+  // Prefer the stored per-player JSON (written at processing time with real
+  // FPL scores + hits). Fall back to totalScore math only if JSON missing.
   const buildPlayerBreakdown = (
     teamPlayers: { id: string; name: string; fplId: string; teamId: string }[],
     teamId: string,
-    totalScore: number
+    totalScore: number,
+    storedJson: string | null,
   ) => {
+    if (storedJson) {
+      try {
+        const parsed = JSON.parse(storedJson) as PlayerScore[];
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch { /* fall through */ }
+    }
     const captainPick = captainByTeamId.get(teamId);
     if (captainPick) {
       return teamPlayers.map(p => {
@@ -280,8 +289,8 @@ async function getFinishedGwScoresFromDb(gameweek: number): Promise<any[]> {
           awayTeamAbbr: fixture.awayTeam.abbreviation,
           homeScore: result.homeScore,
           awayScore: result.awayScore,
-          homePlayers: buildPlayerBreakdown(fixture.homeTeam.players, fixture.homeTeamId, result.homeScore),
-          awayPlayers: buildPlayerBreakdown(fixture.awayTeam.players, fixture.awayTeamId, result.awayScore),
+          homePlayers: buildPlayerBreakdown(fixture.homeTeam.players, fixture.homeTeamId, result.homeScore, result.homePlayerScores),
+          awayPlayers: buildPlayerBreakdown(fixture.awayTeam.players, fixture.awayTeamId, result.awayScore, result.awayPlayerScores),
         });
       }
     } catch (err) {
@@ -765,9 +774,12 @@ async function buildLiveBracket(latestCompletedGw: number) {
 
     // Live path: C-33 is a survival round with no rows in the `fixtures` table,
     // so detectLiveGameweek always reports it as "notStarted" — can't rely on it.
-    // Use `notYetRanked` + deadline-passed as the in-progress signal instead.
+    // Fire the FPL live fetch whenever we have survival entries that are either
+    // un-ranked OR still sitting at score=0 (the stale state left over from a
+    // buggy earlier processing run) — so users don't get wedged on 0s.
+    const hasZeroScores = entries.some(e => e.score === 0);
     let liveDataByTeamId: Map<string, { total: number; players: PlayerScore[] }> | null = null;
-    if (notYetRanked && gw33.deadline <= new Date()) {
+    if ((notYetRanked || hasZeroScores) && gw33.deadline <= new Date()) {
       liveDataByTeamId = new Map();
       for (const e of entries) {
         const teamPlayers = playersByTeamId.get(e.teamId) ?? [];
@@ -798,7 +810,7 @@ async function buildLiveBracket(latestCompletedGw: number) {
     }
 
     // Sort by persisted rank once processed; otherwise rank by live score descending.
-    if (notYetRanked) {
+    if (notYetRanked || (hasZeroScores && liveDataByTeamId)) {
       survivalEntries.sort((a, b) => b.score - a.score);
     } else {
       survivalEntries.sort((a, b) => (a.rank ?? 99) - (b.rank ?? 99));

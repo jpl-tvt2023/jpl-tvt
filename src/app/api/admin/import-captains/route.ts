@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, teams, players, gameweeks, gameweekCaptains } from "@/lib/db";
-import { eq, and } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import { generateId } from "@/lib/id";
 
 // Safely convert any value to a trimmed string
@@ -116,28 +116,36 @@ export async function POST(request: NextRequest) {
               gameweekMap.set(gw, gameweek);
             }
 
-            // Check if captain entry already exists
-            const existing = await db.select().from(gameweekCaptains).where(
+            // Remove any other captain rows for this team in this GW — a
+            // team can only have ONE captain per GW. This prevents stale
+            // auto-assigned rows (isValid=false) from co-existing alongside
+            // the imported pick and corrupting bracket bifurcation display.
+            const teamPlayerIds = team.players.map(p => p.id);
+            const otherTeamCaptains = await db.select().from(gameweekCaptains).where(
               and(
                 eq(gameweekCaptains.gameweekId, gameweek.id),
-                eq(gameweekCaptains.playerId, player.id)
+                inArray(gameweekCaptains.playerId, teamPlayerIds),
               )
             );
+            for (const existing of otherTeamCaptains) {
+              if (existing.playerId !== player.id) {
+                await db.delete(gameweekCaptains).where(eq(gameweekCaptains.id, existing.id));
+              }
+            }
 
-            if (existing.length === 0) {
-              // Create captain entry
+            const thisPlayerCaptain = otherTeamCaptains.find(c => c.playerId === player.id);
+            if (!thisPlayerCaptain) {
               await db.insert(gameweekCaptains).values({
                 id: generateId(),
                 gameweekId: gameweek.id,
                 playerId: player.id,
-                fplScore: 0, // Will be filled when processing scores
+                fplScore: 0,
                 transferHits: 0,
                 doubledScore: 0,
                 isValid: true,
                 announcedAt: new Date(),
               });
-              
-              // Update player's captaincy chips used count
+
               await db.update(players)
                 .set({ captaincyChipsUsed: player.captaincyChipsUsed + 1 })
                 .where(eq(players.id, player.id));
