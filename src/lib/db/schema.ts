@@ -229,6 +229,10 @@ export const challengerSurvivalEntries = sqliteTable("challenger_survival_entrie
   score: integer("score").notNull().default(0),
   rank: integer("rank"),
   advanced: integer("advanced", { mode: "boolean" }).notNull().default(false),
+  // Per-player breakdown JSON (populated when GW33 is processed)
+  // Shape: [{ name, fplId, fplScore, transferHits, isCaptain, finalScore }]
+  // Survival rule: no captain doubling — finalScore = fplScore - transferHits.
+  playerScores: text("player_scores"),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 });
 

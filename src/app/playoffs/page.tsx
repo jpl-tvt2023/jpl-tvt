@@ -71,14 +71,16 @@ interface BracketData {
 
 type TabType = "tvt" | "challenger";
 
-function PlayerBreakdown({ 
-  label, 
-  players, 
-  gameweek 
-}: { 
-  label: string; 
+function PlayerBreakdown({
+  label,
+  players,
+  gameweek,
+  doubleCaptain = true,
+}: {
+  label: string;
   players: { name: string; fplId: string; fplScore: number; transferHits: number; isCaptain: boolean; finalScore: number }[];
   gameweek: number;
+  doubleCaptain?: boolean;
 }) {
   if (players.length === 0) return null;
   return (
@@ -100,12 +102,14 @@ function PlayerBreakdown({
             )}
           </div>
           <div className="text-right">
-            {p.isCaptain ? (
+            {p.isCaptain && doubleCaptain ? (
               <span className="text-yellow-400 font-semibold">
                 {p.fplScore}{p.transferHits > 0 ? ` - ${p.transferHits}` : ""} × 2 = {p.finalScore}
               </span>
             ) : (
-              <span className="text-white">{p.finalScore}{p.transferHits > 0 ? ` (−${p.transferHits})` : ""}</span>
+              <span className={p.isCaptain ? "text-yellow-400 font-semibold" : "text-white"}>
+                {p.finalScore}{p.transferHits > 0 ? ` (−${p.transferHits})` : ""}
+              </span>
             )}
           </div>
         </div>
@@ -471,6 +475,7 @@ function SurvivalTable({
                           label={`${e.abbr} Players`}
                           players={e.players!}
                           gameweek={33}
+                          doubleCaptain={false}
                         />
                       </td>
                     </tr>
@@ -495,6 +500,7 @@ export default function PlayoffsPage() {
   const [liveScores, setLiveScores] = useState<LiveFixtureScore[]>([]);
   const [refreshing, setRefreshing] = useState<number | null>(null);  // GW number being refreshed
   const [tempLiveScores, setTempLiveScores] = useState<Record<number, LiveFixtureScore[]>>({});  // Temp fresh scores
+  const [tempSurvival, setTempSurvival] = useState<SurvivalDisplay[] | null>(null);  // Ephemeral C-33 refresh
 
   const fetchLiveScores = useCallback(async (latestGw: number) => {
     // Try fetching live scores for the current GW and next (in case we're between legs)
@@ -569,6 +575,17 @@ export default function PlayoffsPage() {
         }
       } catch (err) {
         console.error("Live refresh failed:", err);
+      }
+      if (gwNumber === 33) {
+        try {
+          const res = await fetch(`/api/playoffs/survival/refresh?gameweek=33`);
+          if (res.ok) {
+            const fresh = await res.json();
+            setTempSurvival(fresh.entries || []);
+          }
+        } catch (err) {
+          console.error("Survival refresh failed:", err);
+        }
       }
       try {
         const bracketRes = await fetch(`/api/playoffs/bracket?t=${Date.now()}`, { cache: "no-store" });
@@ -764,10 +781,10 @@ export default function PlayoffsPage() {
                   {/* C-33 Survival */}
                   {(data.challenger.c33 as SurvivalDisplay[]).some(e => e.teamId) && (
                     <SurvivalTable
-                      entries={data.challenger.c33 as SurvivalDisplay[]}
+                      entries={tempSurvival ?? (data.challenger.c33 as SurvivalDisplay[])}
                       isLive={
                         33 >= data.latestCompletedGw &&
-                        (data.challenger.c33 as SurvivalDisplay[]).some((e) => (e.score ?? 0) > 0)
+                        (tempSurvival ?? (data.challenger.c33 as SurvivalDisplay[])).some((e) => (e.score ?? 0) > 0)
                       }
                       isRefreshing={refreshing === 33}
                       onRefresh={() => handleRefreshRound(33)}

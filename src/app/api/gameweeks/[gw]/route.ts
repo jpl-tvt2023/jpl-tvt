@@ -252,20 +252,52 @@ async function processChallengerSurvival(
     .where(eq(challengerSurvivalEntries.gameweekId, gw33Id));
   if (entries.length === 0) return { ranked: 0, advanced: 0 };
 
+  // Load captain picks for this GW once (survival rule: no captain doubling,
+  // but we still surface the "C" badge in the per-player breakdown).
+  const allCaptains = await db.select().from(gameweekCaptains)
+    .where(eq(gameweekCaptains.gameweekId, gw33Id));
+
   for (const entry of entries) {
     const teamPlayers = await db.select().from(players)
       .where(eq(players.teamId, entry.teamId));
+    const teamPlayerIds = new Set(teamPlayers.map(p => p.id));
+    const captainPick = allCaptains.find(c => teamPlayerIds.has(c.playerId));
+
+    const breakdown: Array<{
+      name: string;
+      fplId: string;
+      fplScore: number;
+      transferHits: number;
+      isCaptain: boolean;
+      finalScore: number;
+    }> = [];
     let teamScore = 0;
+
     for (const p of teamPlayers) {
+      let points = 0;
+      let transferHits = 0;
       try {
-        const { netScore } = await calculateTeamGameweekScore(p.fplId, gwNumber);
-        teamScore += netScore;
+        const res = await calculateTeamGameweekScore(p.fplId, gwNumber);
+        points = res.points;
+        transferHits = res.transferHits;
       } catch (err) {
         console.error(`Survival score fetch failed for fplId ${p.fplId} GW${gwNumber}:`, err);
       }
+      // Survival scoring: NO captain doubling. finalScore = points - hits.
+      const finalScore = points - transferHits;
+      teamScore += finalScore;
+      breakdown.push({
+        name: p.name,
+        fplId: p.fplId,
+        fplScore: points,
+        transferHits,
+        isCaptain: captainPick?.playerId === p.id,
+        finalScore,
+      });
     }
+
     await db.update(challengerSurvivalEntries)
-      .set({ score: teamScore })
+      .set({ score: teamScore, playerScores: JSON.stringify(breakdown) })
       .where(eq(challengerSurvivalEntries.id, entry.id));
   }
 
