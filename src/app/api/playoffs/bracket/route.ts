@@ -763,26 +763,21 @@ async function buildLiveBracket(latestCompletedGw: number) {
       }));
     };
 
-    // Live path: fetch fresh per-player scores from FPL when GW33 hasn't been processed yet.
+    // Live path: C-33 is a survival round with no rows in the `fixtures` table,
+    // so detectLiveGameweek always reports it as "notStarted" — can't rely on it.
+    // Use `notYetRanked` + deadline-passed as the in-progress signal instead.
     let liveDataByTeamId: Map<string, { total: number; players: PlayerScore[] }> | null = null;
-    if (notYetRanked) {
-      try {
-        const { gwStatus } = await detectLiveGameweek();
-        if (gwStatus[33] === "inProgress" || gwStatus[33] === "finished") {
-          liveDataByTeamId = new Map();
-          for (const e of entries) {
-            const teamPlayers = playersByTeamId.get(e.teamId) ?? [];
-            const captainPlayerId = captainPickByTeamId.get(e.teamId)?.playerId;
-            try {
-              const { total, players: livePlayers } = await calculateLiveTeamScore(teamPlayers, captainPlayerId, 33);
-              liveDataByTeamId.set(e.teamId, { total, players: livePlayers });
-            } catch (err) {
-              console.error(`Survival live-score fetch failed for team ${e.teamId}:`, err);
-            }
-          }
+    if (notYetRanked && gw33.deadline <= new Date()) {
+      liveDataByTeamId = new Map();
+      for (const e of entries) {
+        const teamPlayers = playersByTeamId.get(e.teamId) ?? [];
+        const captainPlayerId = captainPickByTeamId.get(e.teamId)?.playerId;
+        try {
+          const { total, players: livePlayers } = await calculateLiveTeamScore(teamPlayers, captainPlayerId, 33);
+          liveDataByTeamId.set(e.teamId, { total, players: livePlayers });
+        } catch (err) {
+          console.error(`Survival live-score fetch failed for team ${e.teamId}:`, err);
         }
-      } catch (err) {
-        console.error("Survival live-score detection failed:", err);
       }
     }
 
