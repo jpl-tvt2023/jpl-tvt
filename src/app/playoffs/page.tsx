@@ -152,9 +152,7 @@ function MatchCard({
   const showLiveLeg2 = !!liveScoreLeg2 && is2Leg && isLegLive(tie.gw2!);
   const showLive = showLiveLeg1 || showLiveLeg2;
 
-  const showCompletedLeg1 = !!liveScoreLeg1 && !isLegLive(tie.gw1);
-  const showCompletedLeg2 = !!liveScoreLeg2 && is2Leg && !isLegLive(tie.gw2!);
-  const showCompleted = (showCompletedLeg1 || showCompletedLeg2) && !showLive;
+  const showCompleted = tie.winnerId !== null && !showLive;
 
   // Check if bifurcation data exists for any leg
   const hasPlayerData = (liveScoreLeg1?.homePlayers?.length ?? 0) > 0 || (liveScoreLeg2?.homePlayers?.length ?? 0) > 0;

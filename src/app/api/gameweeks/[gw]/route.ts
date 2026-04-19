@@ -252,18 +252,17 @@ async function processChallengerSurvival(
     .where(eq(challengerSurvivalEntries.gameweekId, gw33Id));
   if (entries.length === 0) return { ranked: 0, advanced: 0 };
 
-  const cache = await getAllCachedScores(gwNumber);
-  if (Object.keys(cache).length === 0) {
-    throw new Error(`FPL cache for GW${gwNumber} is empty — survival cannot be ranked. Warm the cache and reprocess.`);
-  }
-
   for (const entry of entries) {
     const teamPlayers = await db.select().from(players)
       .where(eq(players.teamId, entry.teamId));
     let teamScore = 0;
     for (const p of teamPlayers) {
-      const cached = cache[`${p.fplId}_gw${gwNumber}`];
-      if (cached) teamScore += cached.netScore;
+      try {
+        const { netScore } = await calculateTeamGameweekScore(p.fplId, gwNumber);
+        teamScore += netScore;
+      } catch (err) {
+        console.error(`Survival score fetch failed for fplId ${p.fplId} GW${gwNumber}:`, err);
+      }
     }
     await db.update(challengerSurvivalEntries)
       .set({ score: teamScore })
