@@ -4,7 +4,7 @@ import { challengerSurvivalEntries } from "@/lib/db/schema";
 import { calculateTeamGameweekScore } from "@/lib/fpl";
 import { calculateTVTTeamScore, determineMatchResult } from "@/lib/scoring";
 import { getTop2FromGroup } from "@/lib/chip-validation";
-import { getAllCachedScores } from "@/lib/fpl-cache";
+import { getAllCachedScores, clearGameweekCache } from "@/lib/fpl-cache";
 import { eq, and, isNull, isNotNull, sql } from "drizzle-orm";
 import { generateId } from "@/lib/id";
 
@@ -402,7 +402,41 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         .set({ isProcessed: false, pointsAwarded: 0, hadNegativeHits: false })
         .where(eq(gameweekChips.gameweekId, gameweek.id));
       
-      // Re-fetch gameweek with cleared results
+      if (gameweekNumber === 33) {
+        await db.update(challengerSurvivalEntries)
+          .set({ score: 0, rank: null, advanced: false })
+          .where(eq(challengerSurvivalEntries.gameweekId, gameweek.id));
+      }
+
+      // Clear the FPL score cache for this GW so reprocessing fetches fresh
+      // data from the FPL API (avoids stale 0s cached pre-match).
+      await clearGameweekCache(gameweekNumber);
+
+      // Dedupe captain rows: a team can accumulate multiple gameweekCaptains
+      // rows for the same GW when an auto-assigned row (isValid=false) predates
+      // a later import-captains insert (different playerId, same team). Only
+      // one row gets its fplScore updated during processing — the other stays
+      // at 0 and corrupts bracket bifurcation display. Keep one row per
+      // (gameweekId, teamId), preferring isValid=true.
+      const existingCaptains = await db.query.gameweekCaptains.findMany({
+        where: eq(gameweekCaptains.gameweekId, gameweek.id),
+        with: { player: true },
+      });
+      const bestByTeam = new Map<string, typeof existingCaptains[0]>();
+      for (const c of existingCaptains) {
+        const prev = bestByTeam.get(c.player.teamId);
+        if (!prev || (c.isValid && !prev.isValid)) {
+          bestByTeam.set(c.player.teamId, c);
+        }
+      }
+      const keepIds = new Set(Array.from(bestByTeam.values()).map(c => c.id));
+      for (const c of existingCaptains) {
+        if (!keepIds.has(c.id)) {
+          await db.delete(gameweekCaptains).where(eq(gameweekCaptains.id, c.id));
+        }
+      }
+
+      // Re-fetch gameweek with cleared results + deduped captains
       const updatedGwList = await db.query.gameweeks.findMany({
         where: eq(gameweeks.number, gameweekNumber),
         with: {
@@ -417,17 +451,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           captains: true,
         },
       });
-      
-      // Use the updated gameweek for processing
+
       const updatedGameweek = updatedGwList[0];
       if (updatedGameweek) {
         gameweek.fixtures = updatedGameweek.fixtures;
-      }
-
-      if (gameweekNumber === 33) {
-        await db.update(challengerSurvivalEntries)
-          .set({ score: 0, rank: null, advanced: false })
-          .where(eq(challengerSurvivalEntries.gameweekId, gameweek.id));
+        gameweek.captains = updatedGameweek.captains;
       }
     }
 
