@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { playoffTies, challengerSurvivalEntries, fixtures, results, gameweeks, teams, groups, gameweekCaptains } from "@/lib/db/schema";
+import { playoffTies, challengerSurvivalEntries, fixtures, results, gameweeks, teams, groups, gameweekCaptains, players } from "@/lib/db/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
 import { fetchTeamGameweekPicks, detectLiveGameweek } from "@/lib/fpl";
 import { getLiveCachedScores } from "@/lib/fpl-cache";
@@ -690,18 +690,56 @@ async function buildLiveBracket(latestCompletedGw: number) {
   if (gw33) {
     const entries = await db.select().from(challengerSurvivalEntries)
       .where(eq(challengerSurvivalEntries.gameweekId, gw33.id));
+
+    // While GW33 is in progress, ranks/scores haven't been persisted yet —
+    // compute live scores from FPL so the table shows live standings.
+    const notYetRanked = entries.length > 0 && entries.every((e) => e.rank === null);
+    let liveScoreByTeamId: Map<string, number> | null = null;
+    if (notYetRanked) {
+      try {
+        const { gwStatus } = await detectLiveGameweek();
+        if (gwStatus[33] === "inProgress" || gwStatus[33] === "finished") {
+          const captainPicks = await db.query.gameweekCaptains.findMany({
+            where: eq(gameweekCaptains.gameweekId, gw33.id),
+            with: { player: true },
+          });
+          const captainByTeamId = new Map<string, string>();
+          for (const pick of captainPicks) captainByTeamId.set(pick.player.teamId, pick.player.id);
+
+          liveScoreByTeamId = new Map();
+          for (const e of entries) {
+            const teamPlayers = await db.select().from(players).where(eq(players.teamId, e.teamId));
+            try {
+              const { total } = await calculateLiveTeamScore(teamPlayers, captainByTeamId.get(e.teamId), 33);
+              liveScoreByTeamId.set(e.teamId, total);
+            } catch (err) {
+              console.error(`Survival live-score fetch failed for team ${e.teamId}:`, err);
+            }
+          }
+        }
+      } catch (err) {
+        console.error("Survival live-score detection failed:", err);
+      }
+    }
+
     for (const e of entries) {
       const info = teamMap.get(e.teamId);
       survivalEntries.push({
         teamId: e.teamId,
         name: info?.name || "Unknown",
         abbr: info?.abbr || "?",
-        score: e.score,
+        score: liveScoreByTeamId?.get(e.teamId) ?? e.score,
         rank: e.rank,
         advanced: e.advanced,
       });
     }
-    survivalEntries.sort((a, b) => (a.rank ?? 99) - (b.rank ?? 99));
+
+    // Sort by persisted rank once processed; otherwise rank by live score descending.
+    if (notYetRanked) {
+      survivalEntries.sort((a, b) => b.score - a.score);
+    } else {
+      survivalEntries.sort((a, b) => (a.rank ?? 99) - (b.rank ?? 99));
+    }
   }
   // If no survival entries in DB yet, build placeholders from known winners/losers
   const c33: SurvivalDisplay[] = survivalEntries.length > 0 ? survivalEntries : [
