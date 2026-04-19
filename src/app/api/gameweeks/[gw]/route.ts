@@ -252,20 +252,61 @@ async function processChallengerSurvival(
     .where(eq(challengerSurvivalEntries.gameweekId, gw33Id));
   if (entries.length === 0) return { ranked: 0, advanced: 0 };
 
+  const allCaptains = await db.select().from(gameweekCaptains)
+    .where(eq(gameweekCaptains.gameweekId, gw33Id));
+
   for (const entry of entries) {
-    const teamPlayers = await db.select().from(players)
-      .where(eq(players.teamId, entry.teamId));
-    let teamScore = 0;
-    for (const p of teamPlayers) {
+    const teamRow = await db.query.teams.findFirst({
+      where: eq(teams.id, entry.teamId),
+      with: { players: true },
+    });
+    if (!teamRow) continue;
+    const teamPlayers = teamRow.players;
+    const teamPlayerIds = new Set(teamPlayers.map(p => p.id));
+    let captainPick = allCaptains.find(c => teamPlayerIds.has(c.playerId));
+
+    // Pass 1: fetch per-player FPL scores.
+    const fetched = await Promise.all(teamPlayers.map(async (p) => {
       try {
-        const { netScore } = await calculateTeamGameweekScore(p.fplId, gwNumber);
-        teamScore += netScore;
+        const res = await calculateTeamGameweekScore(p.fplId, gwNumber);
+        return { p, points: res.points, transferHits: res.transferHits };
       } catch (err) {
         console.error(`Survival score fetch failed for fplId ${p.fplId} GW${gwNumber}:`, err);
+        return { p, points: 0, transferHits: 0 };
       }
+    }));
+
+    // Auto-assign captain when none announced: lowest net scorer is penalized
+    // by doubling. The helper persists a gameweekCaptains row with
+    // isValid=false so downstream reads (bracket, live views) see a locked
+    // captain just like the TVT h2h path does.
+    if (!captainPick) {
+      const scores = fetched.map(f => ({
+        playerId: f.p.id,
+        playerName: f.p.name,
+        points: f.points,
+        transferHits: f.transferHits,
+        netScore: f.points - f.transferHits,
+      }));
+      captainPick = await autoAssignDefaultCaptain(teamRow, scores, gw33Id, gwNumber);
     }
+
+    const breakdown = fetched.map(({ p, points, transferHits }) => {
+      const isCaptain = captainPick?.playerId === p.id;
+      const net = points - transferHits;
+      return {
+        name: p.name,
+        fplId: p.fplId,
+        fplScore: points,
+        transferHits,
+        isCaptain,
+        finalScore: isCaptain ? net * 2 : net,
+      };
+    });
+    const teamScore = breakdown.reduce((s, b) => s + b.finalScore, 0);
+
     await db.update(challengerSurvivalEntries)
-      .set({ score: teamScore })
+      .set({ score: teamScore, playerScores: JSON.stringify(breakdown) })
       .where(eq(challengerSurvivalEntries.id, entry.id));
   }
 

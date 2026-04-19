@@ -3,6 +3,7 @@ import { db, gameweeks, fixtures, results, teams, gameweekCaptains, players } fr
 import { eq, asc, and } from "drizzle-orm";
 import { clearLiveCache, setLiveCachedScores } from "@/lib/fpl-cache";
 import { detectLiveGameweek, fetchTeamGameweekPicks } from "@/lib/fpl";
+import { pickLowestScorerAsCaptain } from "@/lib/scoring";
 
 /**
  * GET /api/cron/process-scores
@@ -221,42 +222,27 @@ async function calculateLiveTeamScore(
   total: number;
   players: { name: string; fplId: string; fplScore: number; transferHits: number; isCaptain: boolean; finalScore: number }[];
 }> {
-  const playerScores = [];
-  let total = 0;
-
-  for (const player of teamPlayers) {
+  const fetched = await Promise.all(teamPlayers.map(async (player) => {
     try {
-      // Fetch from FPL API - always fresh data
       const picks = await fetchTeamGameweekPicks(player.fplId, gameweek);
-      const fplScore = picks.entry_history.points;
-      const transferHits = picks.entry_history.event_transfers_cost;
-      const netScore = fplScore - transferHits;
-      const isCaptain = captainPlayerId === player.id;
-      const finalScore = isCaptain ? netScore * 2 : netScore;
-
-      playerScores.push({
-        name: player.name,
-        fplId: player.fplId,
-        fplScore,
-        transferHits,
-        isCaptain,
-        finalScore,
-      });
-
-      total += finalScore;
+      return { player, fplScore: picks.entry_history.points, transferHits: picks.entry_history.event_transfers_cost, ok: true as const };
     } catch (err) {
       console.error(`Cron: Failed to fetch FPL data for player ${player.fplId} in GW${gameweek}:`, err);
-      // Use 0 for this player
-      playerScores.push({
-        name: player.name,
-        fplId: player.fplId,
-        fplScore: 0,
-        transferHits: 0,
-        isCaptain: false,
-        finalScore: 0,
-      });
+      return { player, fplScore: 0, transferHits: 0, ok: false as const };
     }
-  }
+  }));
+
+  const effectiveCaptainId = captainPlayerId ?? pickLowestScorerAsCaptain(
+    fetched.filter(f => f.ok).map(f => ({ id: f.player.id, name: f.player.name, netScore: f.fplScore - f.transferHits }))
+  );
+
+  const playerScores = fetched.map(({ player, fplScore, transferHits, ok }) => {
+    if (!ok) return { name: player.name, fplId: player.fplId, fplScore: 0, transferHits: 0, isCaptain: false, finalScore: 0 };
+    const net = fplScore - transferHits;
+    const isCaptain = effectiveCaptainId === player.id;
+    return { name: player.name, fplId: player.fplId, fplScore, transferHits, isCaptain, finalScore: isCaptain ? net * 2 : net };
+  });
+  const total = playerScores.reduce((s, p) => s + p.finalScore, 0);
 
   return { total, players: playerScores };
 }

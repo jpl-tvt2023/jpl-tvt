@@ -71,14 +71,16 @@ interface BracketData {
 
 type TabType = "tvt" | "challenger";
 
-function PlayerBreakdown({ 
-  label, 
-  players, 
-  gameweek 
-}: { 
-  label: string; 
+function PlayerBreakdown({
+  label,
+  players,
+  gameweek,
+  doubleCaptain = true,
+}: {
+  label: string;
   players: { name: string; fplId: string; fplScore: number; transferHits: number; isCaptain: boolean; finalScore: number }[];
   gameweek: number;
+  doubleCaptain?: boolean;
 }) {
   if (players.length === 0) return null;
   return (
@@ -100,12 +102,14 @@ function PlayerBreakdown({
             )}
           </div>
           <div className="text-right">
-            {p.isCaptain ? (
+            {p.isCaptain && doubleCaptain ? (
               <span className="text-yellow-400 font-semibold">
                 {p.fplScore}{p.transferHits > 0 ? ` - ${p.transferHits}` : ""} × 2 = {p.finalScore}
               </span>
             ) : (
-              <span className="text-white">{p.finalScore}{p.transferHits > 0 ? ` (−${p.transferHits})` : ""}</span>
+              <span className={p.isCaptain ? "text-yellow-400 font-semibold" : "text-white"}>
+                {p.finalScore}{p.transferHits > 0 ? ` (−${p.transferHits})` : ""}
+              </span>
             )}
           </div>
         </div>
@@ -353,7 +357,12 @@ function RoundColumn({
   // Determine the GW for this round (from the first tie)
   const roundGw = ties[0].gw1;
   const hasLiveData = mergedScores.some(s => s.gameweek === roundGw);
-  const isRoundLive = roundGw > latestCompletedGw;
+  // Show refresh when the round's latest leg is current or future: for 2-leg
+  // ties use gw2 (so QFs at latestCompleted=33 still expose refresh for GW34);
+  // for single-leg use gw1 >= latest (covers in-flight finalizations like
+  // bonus points on the current GW).
+  const roundLatestLeg = ties[0].gw2 ?? roundGw;
+  const isRoundLive = roundLatestLeg >= latestCompletedGw;
   const isRefreshing = refreshingGw === roundGw;
   // Fresh = temp scores exist for this GW (user just refreshed)
   const isFreshlyRefreshed = (tempLiveScores ? Object.keys(tempLiveScores).map(Number) : []).includes(roundGw);
@@ -436,18 +445,20 @@ function SurvivalTable({
             {entries.map((e, i) => {
               const hasPlayers = (e.players?.length ?? 0) > 0;
               const isExpanded = hasPlayers && expandedTeam === e.teamId;
+              const advances = i < 8;
+              const eliminated = i >= entries.length - 3;
               return (
                 <Fragment key={e.teamId || `placeholder-${i}`}>
                   <tr
-                    className={`border-b border-white/5 ${e.advanced ? "bg-green-900/20" : i >= 8 ? "bg-red-900/10" : ""} ${hasPlayers ? "cursor-pointer hover:bg-slate-700/50 transition-colors" : ""}`}
+                    className={`border-b border-white/5 ${advances ? "bg-green-900/20" : eliminated ? "bg-red-900/10" : ""} ${hasPlayers ? "cursor-pointer hover:bg-slate-700/50 transition-colors" : ""}`}
                     onClick={hasPlayers ? () => setExpandedTeam(isExpanded ? null : e.teamId) : undefined}
                   >
-                    <td className="px-3 py-1.5 text-gray-400">{e.rank ?? i + 1}</td>
-                    <td className={`px-3 py-1.5 ${e.advanced ? "text-green-400 font-semibold" : "text-white"}`}>
+                    <td className="px-3 py-1.5 text-gray-400">{i + 1}</td>
+                    <td className={`px-3 py-1.5 ${advances ? "text-green-400 font-semibold" : "text-white"}`}>
                       <span className="flex items-center gap-1.5">
                         {e.abbr}
-                        {e.advanced && <span className="text-green-400 text-xs">✓</span>}
-                        {!e.advanced && e.rank && e.rank > 8 && <span className="text-red-400 text-xs">✗</span>}
+                        {advances && <span className="text-green-400 text-xs">✓</span>}
+                        {eliminated && <span className="text-red-400 text-xs">✗</span>}
                       </span>
                     </td>
                     <td className="px-3 py-1.5 text-right tabular-nums text-white">
@@ -490,6 +501,7 @@ export default function PlayoffsPage() {
   const [liveScores, setLiveScores] = useState<LiveFixtureScore[]>([]);
   const [refreshing, setRefreshing] = useState<number | null>(null);  // GW number being refreshed
   const [tempLiveScores, setTempLiveScores] = useState<Record<number, LiveFixtureScore[]>>({});  // Temp fresh scores
+  const [tempSurvival, setTempSurvival] = useState<SurvivalDisplay[] | null>(null);  // Ephemeral C-33 refresh
 
   const fetchLiveScores = useCallback(async (latestGw: number) => {
     // Try fetching live scores for the current GW and next (in case we're between legs)
@@ -564,6 +576,17 @@ export default function PlayoffsPage() {
         }
       } catch (err) {
         console.error("Live refresh failed:", err);
+      }
+      if (gwNumber === 33) {
+        try {
+          const res = await fetch(`/api/playoffs/survival/refresh?gameweek=33`);
+          if (res.ok) {
+            const fresh = await res.json();
+            setTempSurvival(fresh.entries || []);
+          }
+        } catch (err) {
+          console.error("Survival refresh failed:", err);
+        }
       }
       try {
         const bracketRes = await fetch(`/api/playoffs/bracket?t=${Date.now()}`, { cache: "no-store" });
@@ -759,11 +782,10 @@ export default function PlayoffsPage() {
                   {/* C-33 Survival */}
                   {(data.challenger.c33 as SurvivalDisplay[]).some(e => e.teamId) && (
                     <SurvivalTable
-                      entries={data.challenger.c33 as SurvivalDisplay[]}
+                      entries={tempSurvival ?? (data.challenger.c33 as SurvivalDisplay[])}
                       isLive={
-                        33 > data.latestCompletedGw &&
-                        (data.challenger.c33 as SurvivalDisplay[]).some((e) => e.rank === null) &&
-                        (data.challenger.c33 as SurvivalDisplay[]).some((e) => (e.score ?? 0) > 0)
+                        33 >= data.latestCompletedGw &&
+                        (tempSurvival ?? (data.challenger.c33 as SurvivalDisplay[])).some((e) => (e.score ?? 0) > 0)
                       }
                       isRefreshing={refreshing === 33}
                       onRefresh={() => handleRefreshRound(33)}

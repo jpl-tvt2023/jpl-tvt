@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { playoffTies, challengerSurvivalEntries, fixtures, results, gameweeks, teams, groups, gameweekCaptains, players } from "@/lib/db/schema";
 import { eq, and, desc, sql, inArray } from "drizzle-orm";
 import { fetchTeamGameweekPicks, detectLiveGameweek } from "@/lib/fpl";
+import { pickLowestScorerAsCaptain } from "@/lib/scoring";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -395,43 +396,46 @@ async function calculateLiveTeamScore(
   total: number;
   players: { name: string; fplId: string; fplScore: number; transferHits: number; isCaptain: boolean; finalScore: number }[];
 }> {
-  const playerScores = [];
-  let total = 0;
+  // Pass 1: fetch per-player net scores so we can pick an auto-captain if none announced.
+  const fetched = await Promise.all(
+    teamPlayers.map(async (player) => {
+      try {
+        const picks = await fetchTeamGameweekPicks(player.fplId, gameweek);
+        const fplScore = picks.entry_history.points;
+        const transferHits = picks.entry_history.event_transfers_cost;
+        return { player, fplScore, transferHits, ok: true as const };
+      } catch (err) {
+        console.error(`Failed to fetch FPL data for player ${player.fplId} in GW${gameweek}:`, err);
+        return { player, fplScore: 0, transferHits: 0, ok: false as const };
+      }
+    })
+  );
 
-  for (const player of teamPlayers) {
-    try {
-      // Fetch from FPL API - always fresh data
-      const picks = await fetchTeamGameweekPicks(player.fplId, gameweek);
-      const fplScore = picks.entry_history.points;
-      const transferHits = picks.entry_history.event_transfers_cost;
-      const netScore = fplScore - transferHits;
-      const isCaptain = captainPlayerId === player.id;
-      const finalScore = isCaptain ? netScore * 2 : netScore;
+  const effectiveCaptainId = captainPlayerId ?? pickLowestScorerAsCaptain(
+    fetched.filter(f => f.ok).map(f => ({
+      id: f.player.id,
+      name: f.player.name,
+      netScore: f.fplScore - f.transferHits,
+    }))
+  );
 
-      playerScores.push({
-        name: player.name,
-        fplId: player.fplId,
-        fplScore,
-        transferHits,
-        isCaptain,
-        finalScore,
-      });
-
-      total += finalScore;
-    } catch (err) {
-      console.error(`Failed to fetch FPL data for player ${player.fplId} in GW${gameweek}:`, err);
-      // Use 0 for this player
-      playerScores.push({
-        name: player.name,
-        fplId: player.fplId,
-        fplScore: 0,
-        transferHits: 0,
-        isCaptain: false,
-        finalScore: 0,
-      });
+  const playerScores = fetched.map(({ player, fplScore, transferHits, ok }) => {
+    if (!ok) {
+      return { name: player.name, fplId: player.fplId, fplScore: 0, transferHits: 0, isCaptain: false, finalScore: 0 };
     }
-  }
+    const net = fplScore - transferHits;
+    const isCaptain = effectiveCaptainId === player.id;
+    return {
+      name: player.name,
+      fplId: player.fplId,
+      fplScore,
+      transferHits,
+      isCaptain,
+      finalScore: isCaptain ? net * 2 : net,
+    };
+  });
 
+  const total = playerScores.reduce((s, p) => s + p.finalScore, 0);
   return { total, players: playerScores };
 }
 
@@ -737,38 +741,27 @@ async function buildLiveBracket(latestCompletedGw: number) {
       playersByTeamId.set(p.teamId, arr);
     }
 
-    // Build per-player breakdown from a locked total score + captain pick
-    // (mirrors the logic in getFinishedGwScoresFromDb).
-    const buildFinishedBreakdown = (teamId: string, totalScore: number): PlayerScore[] => {
-      const teamPlayers = playersByTeamId.get(teamId) ?? [];
-      const captainPick = captainPickByTeamId.get(teamId);
-      if (captainPick) {
-        return teamPlayers.map((p) => {
-          const isCaptain = captainPick.playerId === p.id;
-          if (isCaptain) {
-            return {
-              name: p.name, fplId: p.fplId, isCaptain: true,
-              fplScore: captainPick.fplScore, transferHits: captainPick.transferHits,
-              finalScore: captainPick.doubledScore,
-            };
-          }
-          const nonCaptainScore = totalScore - captainPick.doubledScore;
-          return {
-            name: p.name, fplId: p.fplId, isCaptain: false,
-            fplScore: nonCaptainScore, transferHits: 0,
-            finalScore: nonCaptainScore,
-          };
-        });
+    // Survival per-player breakdown: prefer the JSON persisted by
+    // processChallengerSurvival; otherwise return a neutral fallback with the
+    // captain flag set from gameweekCaptains. No captain doubling for survival.
+    const buildSurvivalBreakdown = (entry: typeof entries[0]): PlayerScore[] => {
+      if (entry.playerScores) {
+        try {
+          const parsed = JSON.parse(entry.playerScores) as PlayerScore[];
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        } catch (err) {
+          console.error(`Failed to parse playerScores for entry ${entry.id}:`, err);
+        }
       }
-      // No captain pick — infer (least scorer doubled as captain)
-      const captainBase = Math.floor((totalScore - 1) / 3);
-      const captainDoubled = captainBase * 2;
-      const nonCaptainScore = totalScore - captainDoubled;
-      const sorted = [...teamPlayers].sort((a, b) => a.name.localeCompare(b.name));
-      return sorted.map((p, i) => ({
-        name: p.name, fplId: p.fplId, isCaptain: i === 0,
-        fplScore: i === 0 ? captainBase : nonCaptainScore, transferHits: 0,
-        finalScore: i === 0 ? captainDoubled : nonCaptainScore,
+      const teamPlayers = playersByTeamId.get(entry.teamId) ?? [];
+      const captainPick = captainPickByTeamId.get(entry.teamId);
+      return teamPlayers.map((p) => ({
+        name: p.name,
+        fplId: p.fplId,
+        fplScore: 0,
+        transferHits: 0,
+        isCaptain: captainPick?.playerId === p.id,
+        finalScore: 0,
       }));
     };
 
@@ -797,7 +790,7 @@ async function buildLiveBracket(latestCompletedGw: number) {
       const info = teamMap.get(e.teamId);
       const live = liveDataByTeamId?.get(e.teamId);
       const score = live?.total ?? e.score;
-      const playersBreakdown = live?.players ?? buildFinishedBreakdown(e.teamId, score);
+      const playersBreakdown = live?.players ?? buildSurvivalBreakdown(e);
       survivalEntries.push({
         teamId: e.teamId,
         name: info?.name || "Unknown",
