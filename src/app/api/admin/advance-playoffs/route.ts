@@ -285,7 +285,7 @@ async function checkPrerequisite(gwNumber: number): Promise<{ ok: true } | { ok:
  */
 export async function POST(request: NextRequest) {
   const sessionType = request.headers.get("x-session-type");
-  if (sessionType !== "admin") {
+  if (sessionType !== "admin" && sessionType !== "superadmin") {
     return NextResponse.json({ error: "Admin access required" }, { status: 403 });
   }
 
