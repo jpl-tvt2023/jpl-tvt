@@ -431,14 +431,14 @@ function SurvivalTable({
           </>
         )}
       </h3>
-      <div className="bg-slate-800/80 border border-white/10 rounded-lg overflow-hidden">
+      <div className="bg-slate-800/80 border border-white/10 rounded-lg overflow-hidden inline-block max-w-full align-top">
         <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="text-sm w-auto">
           <thead>
             <tr className="text-gray-400 text-xs border-b border-white/10">
-              <th className="text-left px-3 py-1.5 w-10">#</th>
-              <th className="text-left px-3 py-1.5">Team</th>
-              <th className="text-right px-3 py-1.5">Score</th>
+              <th className="text-left px-3 py-1.5 w-10 whitespace-nowrap">#</th>
+              <th className="text-left px-3 py-1.5 whitespace-nowrap min-w-[9rem]">Team</th>
+              <th className="text-right px-3 py-1.5 whitespace-nowrap">Score</th>
             </tr>
           </thead>
           <tbody>
