@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { playoffTies, challengerSurvivalEntries, fixtures, results, gameweeks, teams, groups, gameweekCaptains, players } from "@/lib/db/schema";
-import { eq, and, desc, sql } from "drizzle-orm";
+import { eq, and, desc, sql, inArray } from "drizzle-orm";
 import { fetchTeamGameweekPicks, detectLiveGameweek } from "@/lib/fpl";
 import { getLiveCachedScores } from "@/lib/fpl-cache";
 
@@ -56,6 +56,15 @@ interface TieDisplay {
   loserId: string | null;
 }
 
+interface PlayerScore {
+  name: string;
+  fplId: string;
+  fplScore: number;
+  transferHits: number;
+  isCaptain: boolean;
+  finalScore: number;
+}
+
 interface SurvivalDisplay {
   teamId: string;
   name: string;
@@ -63,6 +72,7 @@ interface SurvivalDisplay {
   score: number;
   rank: number | null;
   advanced: boolean;
+  players?: PlayerScore[];
 }
 
 /**
@@ -691,27 +701,78 @@ async function buildLiveBracket(latestCompletedGw: number) {
     const entries = await db.select().from(challengerSurvivalEntries)
       .where(eq(challengerSurvivalEntries.gameweekId, gw33.id));
 
-    // While GW33 is in progress, ranks/scores haven't been persisted yet —
-    // compute live scores from FPL so the table shows live standings.
     const notYetRanked = entries.length > 0 && entries.every((e) => e.rank === null);
-    let liveScoreByTeamId: Map<string, number> | null = null;
+
+    // Pre-fetch captain picks + players for all survival teams (used by both
+    // live and finished paths to build per-player breakdowns).
+    const captainPicks = entries.length > 0
+      ? await db.query.gameweekCaptains.findMany({
+          where: eq(gameweekCaptains.gameweekId, gw33.id),
+          with: { player: true },
+        })
+      : [];
+    const captainPickByTeamId = new Map<string, typeof captainPicks[0]>();
+    for (const pick of captainPicks) captainPickByTeamId.set(pick.player.teamId, pick);
+
+    const teamIds = entries.map((e) => e.teamId);
+    const allSurvivalPlayers = teamIds.length > 0
+      ? await db.select().from(players).where(inArray(players.teamId, teamIds))
+      : [];
+    const playersByTeamId = new Map<string, typeof allSurvivalPlayers>();
+    for (const p of allSurvivalPlayers) {
+      const arr = playersByTeamId.get(p.teamId) ?? [];
+      arr.push(p);
+      playersByTeamId.set(p.teamId, arr);
+    }
+
+    // Build per-player breakdown from a locked total score + captain pick
+    // (mirrors the logic in getFinishedGwScoresFromDb).
+    const buildFinishedBreakdown = (teamId: string, totalScore: number): PlayerScore[] => {
+      const teamPlayers = playersByTeamId.get(teamId) ?? [];
+      const captainPick = captainPickByTeamId.get(teamId);
+      if (captainPick) {
+        return teamPlayers.map((p) => {
+          const isCaptain = captainPick.playerId === p.id;
+          if (isCaptain) {
+            return {
+              name: p.name, fplId: p.fplId, isCaptain: true,
+              fplScore: captainPick.fplScore, transferHits: captainPick.transferHits,
+              finalScore: captainPick.doubledScore,
+            };
+          }
+          const nonCaptainScore = totalScore - captainPick.doubledScore;
+          return {
+            name: p.name, fplId: p.fplId, isCaptain: false,
+            fplScore: nonCaptainScore, transferHits: 0,
+            finalScore: nonCaptainScore,
+          };
+        });
+      }
+      // No captain pick — infer (least scorer doubled as captain)
+      const captainBase = Math.floor((totalScore - 1) / 3);
+      const captainDoubled = captainBase * 2;
+      const nonCaptainScore = totalScore - captainDoubled;
+      const sorted = [...teamPlayers].sort((a, b) => a.name.localeCompare(b.name));
+      return sorted.map((p, i) => ({
+        name: p.name, fplId: p.fplId, isCaptain: i === 0,
+        fplScore: i === 0 ? captainBase : nonCaptainScore, transferHits: 0,
+        finalScore: i === 0 ? captainDoubled : nonCaptainScore,
+      }));
+    };
+
+    // Live path: fetch fresh per-player scores from FPL when GW33 hasn't been processed yet.
+    let liveDataByTeamId: Map<string, { total: number; players: PlayerScore[] }> | null = null;
     if (notYetRanked) {
       try {
         const { gwStatus } = await detectLiveGameweek();
         if (gwStatus[33] === "inProgress" || gwStatus[33] === "finished") {
-          const captainPicks = await db.query.gameweekCaptains.findMany({
-            where: eq(gameweekCaptains.gameweekId, gw33.id),
-            with: { player: true },
-          });
-          const captainByTeamId = new Map<string, string>();
-          for (const pick of captainPicks) captainByTeamId.set(pick.player.teamId, pick.player.id);
-
-          liveScoreByTeamId = new Map();
+          liveDataByTeamId = new Map();
           for (const e of entries) {
-            const teamPlayers = await db.select().from(players).where(eq(players.teamId, e.teamId));
+            const teamPlayers = playersByTeamId.get(e.teamId) ?? [];
+            const captainPlayerId = captainPickByTeamId.get(e.teamId)?.playerId;
             try {
-              const { total } = await calculateLiveTeamScore(teamPlayers, captainByTeamId.get(e.teamId), 33);
-              liveScoreByTeamId.set(e.teamId, total);
+              const { total, players: livePlayers } = await calculateLiveTeamScore(teamPlayers, captainPlayerId, 33);
+              liveDataByTeamId.set(e.teamId, { total, players: livePlayers });
             } catch (err) {
               console.error(`Survival live-score fetch failed for team ${e.teamId}:`, err);
             }
@@ -724,13 +785,17 @@ async function buildLiveBracket(latestCompletedGw: number) {
 
     for (const e of entries) {
       const info = teamMap.get(e.teamId);
+      const live = liveDataByTeamId?.get(e.teamId);
+      const score = live?.total ?? e.score;
+      const playersBreakdown = live?.players ?? buildFinishedBreakdown(e.teamId, score);
       survivalEntries.push({
         teamId: e.teamId,
         name: info?.name || "Unknown",
         abbr: info?.abbr || "?",
-        score: liveScoreByTeamId?.get(e.teamId) ?? e.score,
+        score,
         rank: e.rank,
         advanced: e.advanced,
+        players: playersBreakdown,
       });
     }
 

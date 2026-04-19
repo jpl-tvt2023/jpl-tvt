@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, Fragment } from "react";
 import Link from "next/link";
 
 interface LiveFixtureScore {
@@ -44,6 +44,7 @@ interface SurvivalDisplay {
   score: number;
   rank: number | null;
   advanced: boolean;
+  players?: { name: string; fplId: string; fplScore: number; transferHits: number; isCaptain: boolean; finalScore: number }[];
 }
 
 interface BracketData {
@@ -284,7 +285,7 @@ function MatchCard({
       {expanded && hasPlayerData && (
         <div className="mt-2 pt-2 border-t border-white/10" onClick={(e) => e.stopPropagation()}>
           {/* Leg 1 bifurcation */}
-          {showLiveLeg1 && liveScoreLeg1 && (liveScoreLeg1.homePlayers?.length ?? 0) > 0 && (
+          {liveScoreLeg1 && (liveScoreLeg1.homePlayers?.length ?? 0) > 0 && (
             <div>
               {is2Leg && <div className="text-[10px] text-gray-500 font-semibold mb-1">Leg 1 (GW{tie.gw1})</div>}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -302,8 +303,8 @@ function MatchCard({
             </div>
           )}
           {/* Leg 2 bifurcation */}
-          {showLiveLeg2 && liveScoreLeg2 && (liveScoreLeg2.homePlayers?.length ?? 0) > 0 && (
-            <div className={showLiveLeg1 ? "mt-2" : ""}>
+          {liveScoreLeg2 && (liveScoreLeg2.homePlayers?.length ?? 0) > 0 && (
+            <div className={liveScoreLeg1 ? "mt-2" : ""}>
               <div className="text-[10px] text-gray-500 font-semibold mb-1">Leg 2 (GW{tie.gw2})</div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <PlayerBreakdown
@@ -400,6 +401,7 @@ function SurvivalTable({
   isRefreshing: boolean;
   onRefresh: () => void;
 }) {
+  const [expandedTeam, setExpandedTeam] = useState<string | null>(null);
   if (entries.length === 0) return null;
   return (
     <div>
@@ -434,22 +436,47 @@ function SurvivalTable({
             </tr>
           </thead>
           <tbody>
-            {entries.map((e, i) => (
-              <tr key={e.teamId || `placeholder-${i}`} className={`border-b border-white/5 ${e.advanced ? "bg-green-900/20" : i >= 8 ? "bg-red-900/10" : ""}`}>
-                <td className="px-3 py-2 text-gray-400">{e.rank ?? i + 1}</td>
-                <td className={`px-3 py-2 ${e.advanced ? "text-green-400 font-semibold" : "text-white"}`}>{e.abbr}</td>
-                <td className="px-3 py-2 text-right tabular-nums text-white">{e.score || "–"}</td>
-                <td className="px-3 py-2 text-center">
-                  {e.advanced ? (
-                    <span className="text-green-400 text-xs">✓</span>
-                  ) : e.rank && e.rank > 8 ? (
-                    <span className="text-red-400 text-xs">✗</span>
-                  ) : (
-                    <span className="text-gray-500 text-xs">—</span>
+            {entries.map((e, i) => {
+              const hasPlayers = (e.players?.length ?? 0) > 0;
+              const isExpanded = hasPlayers && expandedTeam === e.teamId;
+              return (
+                <Fragment key={e.teamId || `placeholder-${i}`}>
+                  <tr
+                    className={`border-b border-white/5 ${e.advanced ? "bg-green-900/20" : i >= 8 ? "bg-red-900/10" : ""} ${hasPlayers ? "cursor-pointer hover:bg-slate-700/50 transition-colors" : ""}`}
+                    onClick={hasPlayers ? () => setExpandedTeam(isExpanded ? null : e.teamId) : undefined}
+                  >
+                    <td className="px-3 py-2 text-gray-400">{e.rank ?? i + 1}</td>
+                    <td className={`px-3 py-2 ${e.advanced ? "text-green-400 font-semibold" : "text-white"}`}>{e.abbr}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-white">{e.score || "–"}</td>
+                    <td className="px-3 py-2 text-center">
+                      <div className="flex items-center justify-center gap-1">
+                        {e.advanced ? (
+                          <span className="text-green-400 text-xs">✓</span>
+                        ) : e.rank && e.rank > 8 ? (
+                          <span className="text-red-400 text-xs">✗</span>
+                        ) : (
+                          <span className="text-gray-500 text-xs">—</span>
+                        )}
+                        {hasPlayers && (
+                          <span className="text-gray-500 text-[10px]">{isExpanded ? "▲" : "▼"}</span>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                  {isExpanded && (
+                    <tr className="border-b border-white/5 bg-slate-900/60">
+                      <td colSpan={4} className="px-3 py-2">
+                        <PlayerBreakdown
+                          label={`${e.abbr} Players`}
+                          players={e.players!}
+                          gameweek={33}
+                        />
+                      </td>
+                    </tr>
                   )}
-                </td>
-              </tr>
-            ))}
+                </Fragment>
+              );
+            })}
           </tbody>
         </table>
         </div>
@@ -530,18 +557,24 @@ export default function PlayoffsPage() {
   const handleRefreshRound = async (gwNumber: number) => {
     setRefreshing(gwNumber);
     try {
-      const res = await fetch(`/api/fixtures/live/refresh?gameweek=${gwNumber}`);
-      if (res.ok) {
-        const freshData = await res.json();
-        setTempLiveScores(prev => ({
-          ...prev,
-          [gwNumber]: freshData.fixtures || []
-        }));
+      try {
+        const res = await fetch(`/api/fixtures/live/refresh?gameweek=${gwNumber}`);
+        if (res.ok) {
+          const freshData = await res.json();
+          setTempLiveScores(prev => ({
+            ...prev,
+            [gwNumber]: freshData.fixtures || []
+          }));
+        }
+      } catch (err) {
+        console.error("Live refresh failed:", err);
       }
-      const bracketRes = await fetch("/api/playoffs/bracket");
-      if (bracketRes.ok) setData(await bracketRes.json());
-    } catch (err) {
-      console.error("Refresh failed:", err);
+      try {
+        const bracketRes = await fetch("/api/playoffs/bracket");
+        if (bracketRes.ok) setData(await bracketRes.json());
+      } catch (err) {
+        console.error("Bracket refresh failed:", err);
+      }
     } finally {
       setRefreshing(null);
     }
