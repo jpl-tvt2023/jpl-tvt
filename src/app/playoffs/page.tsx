@@ -353,7 +353,12 @@ function RoundColumn({
   // Determine the GW for this round (from the first tie)
   const roundGw = ties[0].gw1;
   const hasLiveData = mergedScores.some(s => s.gameweek === roundGw);
-  const isRoundLive = roundGw > latestCompletedGw;
+  // Show refresh when the round's latest leg is current or future: for 2-leg
+  // ties use gw2 (so QFs at latestCompleted=33 still expose refresh for GW34);
+  // for single-leg use gw1 >= latest (covers in-flight finalizations like
+  // bonus points on the current GW).
+  const roundLatestLeg = ties[0].gw2 ?? roundGw;
+  const isRoundLive = roundLatestLeg >= latestCompletedGw;
   const isRefreshing = refreshingGw === roundGw;
   // Fresh = temp scores exist for this GW (user just refreshed)
   const isFreshlyRefreshed = (tempLiveScores ? Object.keys(tempLiveScores).map(Number) : []).includes(roundGw);
@@ -761,8 +766,7 @@ export default function PlayoffsPage() {
                     <SurvivalTable
                       entries={data.challenger.c33 as SurvivalDisplay[]}
                       isLive={
-                        33 > data.latestCompletedGw &&
-                        (data.challenger.c33 as SurvivalDisplay[]).some((e) => e.rank === null) &&
+                        33 >= data.latestCompletedGw &&
                         (data.challenger.c33 as SurvivalDisplay[]).some((e) => (e.score ?? 0) > 0)
                       }
                       isRefreshing={refreshing === 33}
