@@ -113,16 +113,18 @@ function PlayerBreakdown({
   );
 }
 
-function MatchCard({ 
-  tie, 
-  compact, 
+function MatchCard({
+  tie,
+  compact,
   liveScores,
   isFreshlyRefreshed,
-}: { 
-  tie: TieDisplay; 
-  compact?: boolean; 
+  latestCompletedGw,
+}: {
+  tie: TieDisplay;
+  compact?: boolean;
   liveScores?: LiveFixtureScore[];
   isFreshlyRefreshed?: boolean;
+  latestCompletedGw: number;
 }) {
   const [expanded, setExpanded] = useState(false);
   const is2Leg = tie.gw2 !== null;
@@ -144,9 +146,14 @@ function MatchCard({
   const liveScoreLeg1 = getLiveScoreForGW(tie.gw1);
   const liveScoreLeg2 = is2Leg ? getLiveScoreForGW(tie.gw2!) : undefined;
 
-  const showLiveLeg1 = !!liveScoreLeg1;
-  const showLiveLeg2 = !!liveScoreLeg2;
+  const isLegLive = (gw: number) => gw > latestCompletedGw;
+  const showLiveLeg1 = !!liveScoreLeg1 && isLegLive(tie.gw1);
+  const showLiveLeg2 = !!liveScoreLeg2 && is2Leg && isLegLive(tie.gw2!);
   const showLive = showLiveLeg1 || showLiveLeg2;
+
+  const showCompletedLeg1 = !!liveScoreLeg1 && !isLegLive(tie.gw1);
+  const showCompletedLeg2 = !!liveScoreLeg2 && is2Leg && !isLegLive(tie.gw2!);
+  const showCompleted = (showCompletedLeg1 || showCompletedLeg2) && !showLive;
 
   // Check if bifurcation data exists for any leg
   const hasPlayerData = (liveScoreLeg1?.homePlayers?.length ?? 0) > 0 || (liveScoreLeg2?.homePlayers?.length ?? 0) > 0;
@@ -195,6 +202,12 @@ function MatchCard({
                 isFreshlyRefreshed ? "bg-amber-400" : "bg-gray-400"
               }`}></span>
               LIVE
+            </span>
+          )}
+          {showCompleted && (
+            <span className="flex items-center gap-1 normal-case text-green-500/70">
+              <span className="h-1.5 w-1.5 rounded-full bg-green-500/70"></span>
+              COMPLETED
             </span>
           )}
           {hasPlayerData && (
@@ -312,22 +325,24 @@ function MatchCard({
   );
 }
 
-function RoundColumn({ 
-  title, 
-  ties, 
-  className, 
+function RoundColumn({
+  title,
+  ties,
+  className,
   liveScores,
   refreshingGw,
   tempLiveScores,
-  onRefreshRound
-}: { 
-  title: string; 
-  ties: TieDisplay[]; 
-  className?: string; 
+  onRefreshRound,
+  latestCompletedGw,
+}: {
+  title: string;
+  ties: TieDisplay[];
+  className?: string;
   liveScores?: Record<number, LiveFixtureScore[]>;
   refreshingGw?: number | null;
   tempLiveScores?: Record<number, LiveFixtureScore[]>;
   onRefreshRound?: (gw: number) => void;
+  latestCompletedGw: number;
 }) {
   if (ties.length === 0) return null;
   
@@ -339,6 +354,7 @@ function RoundColumn({
   // Determine the GW for this round (from the first tie)
   const roundGw = ties[0].gw1;
   const hasLiveData = mergedScores.some(s => s.gameweek === roundGw);
+  const isRoundLive = roundGw > latestCompletedGw;
   const isRefreshing = refreshingGw === roundGw;
   // Fresh = temp scores exist for this GW (user just refreshed)
   const isFreshlyRefreshed = (tempLiveScores ? Object.keys(tempLiveScores).map(Number) : []).includes(roundGw);
@@ -347,7 +363,7 @@ function RoundColumn({
     <div className={`flex flex-col gap-3 ${className || ""}`}>
       <div className="flex items-center justify-center gap-2">
         <h3 className="text-xs font-bold text-yellow-400 uppercase tracking-wider text-center">{title}</h3>
-        {hasLiveData && onRefreshRound && (
+        {hasLiveData && onRefreshRound && isRoundLive && (
           <button
             onClick={() => onRefreshRound(roundGw)}
             disabled={isRefreshing}
@@ -360,11 +376,12 @@ function RoundColumn({
       </div>
       <div className="flex flex-col gap-2 justify-around flex-1">
         {ties.map((tie) => (
-          <MatchCard 
-            key={tie.tieId} 
-            tie={tie} 
+          <MatchCard
+            key={tie.tieId}
+            tie={tie}
             liveScores={mergedScores}
             isFreshlyRefreshed={isFreshlyRefreshed}
+            latestCompletedGw={latestCompletedGw}
           />
         ))}
       </div>
@@ -372,17 +389,37 @@ function RoundColumn({
   );
 }
 
-function SurvivalTable({ entries, isLive }: { entries: SurvivalDisplay[]; isLive: boolean }) {
+function SurvivalTable({
+  entries,
+  isLive,
+  isRefreshing,
+  onRefresh,
+}: {
+  entries: SurvivalDisplay[];
+  isLive: boolean;
+  isRefreshing: boolean;
+  onRefresh: () => void;
+}) {
   if (entries.length === 0) return null;
   return (
     <div>
       <h3 className="text-xs font-bold text-yellow-400 uppercase tracking-wider mb-2 flex items-center gap-2">
         <span>C-33 Survival (GW33) — Top 8 Advance</span>
         {isLive && (
-          <span className="flex items-center gap-1 normal-case text-gray-400 font-normal">
-            <span className="h-1.5 w-1.5 rounded-full animate-pulse bg-gray-400"></span>
-            LIVE
-          </span>
+          <>
+            <span className="flex items-center gap-1 normal-case text-gray-400 font-normal">
+              <span className="h-1.5 w-1.5 rounded-full animate-pulse bg-gray-400"></span>
+              LIVE
+            </span>
+            <button
+              onClick={onRefresh}
+              disabled={isRefreshing}
+              className={`text-green-400 hover:text-green-300 disabled:opacity-50 transition-all text-sm ${isRefreshing ? "animate-spin" : ""}`}
+              title="Refresh live scores"
+            >
+              ⟳
+            </button>
+          </>
         )}
       </h3>
       <div className="bg-slate-800/80 border border-white/10 rounded-lg overflow-hidden">
@@ -501,6 +538,8 @@ export default function PlayoffsPage() {
           [gwNumber]: freshData.fixtures || []
         }));
       }
+      const bracketRes = await fetch("/api/playoffs/bracket");
+      if (bracketRes.ok) setData(await bracketRes.json());
     } catch (err) {
       console.error("Refresh failed:", err);
     } finally {
@@ -607,6 +646,7 @@ export default function PlayoffsPage() {
                 refreshingGw={refreshing}
                 tempLiveScores={tempLiveScores}
                 onRefreshRound={handleRefreshRound}
+                latestCompletedGw={data.latestCompletedGw}
               />
               <RoundColumn 
                 title="Quarter-Finals" 
@@ -615,6 +655,7 @@ export default function PlayoffsPage() {
                 refreshingGw={refreshing}
                 tempLiveScores={tempLiveScores}
                 onRefreshRound={handleRefreshRound}
+                latestCompletedGw={data.latestCompletedGw}
               />
               <RoundColumn 
                 title="Semi-Finals" 
@@ -623,6 +664,7 @@ export default function PlayoffsPage() {
                 refreshingGw={refreshing}
                 tempLiveScores={tempLiveScores}
                 onRefreshRound={handleRefreshRound}
+                latestCompletedGw={data.latestCompletedGw}
               />
               <RoundColumn 
                 title="Grand Finale" 
@@ -631,6 +673,7 @@ export default function PlayoffsPage() {
                 refreshingGw={refreshing}
                 tempLiveScores={tempLiveScores}
                 onRefreshRound={handleRefreshRound}
+                latestCompletedGw={data.latestCompletedGw}
               />
             </div>
           </div>
@@ -652,12 +695,13 @@ export default function PlayoffsPage() {
                     const ties = roundTies as TieDisplay[];
                     if (!ties || ties.length === 0) return null;
                     const hasLive = mergedScores.some(s => s.gameweek === gw);
+                    const isRoundLive = gw > data.latestCompletedGw;
                     const isRoundRefreshing = refreshing === gw;
                     return (
                       <div key={key}>
                         <div className="flex items-center gap-2 mb-2">
                           <h3 className="text-xs font-bold text-yellow-400 uppercase tracking-wider">{label}</h3>
-                          {hasLive && (
+                          {hasLive && isRoundLive && (
                             <button
                               onClick={() => handleRefreshRound(gw)}
                               disabled={isRoundRefreshing}
@@ -670,11 +714,12 @@ export default function PlayoffsPage() {
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                           {ties.map(tie => (
-                            <MatchCard 
-                              key={tie.tieId} 
-                              tie={tie} 
-                              compact 
+                            <MatchCard
+                              key={tie.tieId}
+                              tie={tie}
+                              compact
                               liveScores={mergedScores}
+                              latestCompletedGw={data.latestCompletedGw}
                             />
                           ))}
                         </div>
@@ -687,9 +732,12 @@ export default function PlayoffsPage() {
                     <SurvivalTable
                       entries={data.challenger.c33 as SurvivalDisplay[]}
                       isLive={
+                        33 > data.latestCompletedGw &&
                         (data.challenger.c33 as SurvivalDisplay[]).some((e) => e.rank === null) &&
                         (data.challenger.c33 as SurvivalDisplay[]).some((e) => (e.score ?? 0) > 0)
                       }
+                      isRefreshing={refreshing === 33}
+                      onRefresh={() => handleRefreshRound(33)}
                     />
                   )}
 
@@ -704,12 +752,13 @@ export default function PlayoffsPage() {
                     const ties = roundData as TieDisplay[];
                     if (!ties || ties.length === 0) return null;
                     const hasLive = mergedScores.some(s => s.gameweek === gw);
+                    const isRoundLive = gw > data.latestCompletedGw;
                     const isRoundRefreshing = refreshing === gw;
                     return (
                       <div key={key}>
                         <div className="flex items-center gap-2 mb-2">
                           <h3 className="text-xs font-bold text-yellow-400 uppercase tracking-wider">{label}</h3>
-                          {hasLive && (
+                          {hasLive && isRoundLive && (
                             <button
                               onClick={() => handleRefreshRound(gw)}
                               disabled={isRoundRefreshing}
@@ -722,11 +771,12 @@ export default function PlayoffsPage() {
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                           {ties.map(tie => (
-                            <MatchCard 
-                              key={tie.tieId} 
-                              tie={tie} 
-                              compact 
+                            <MatchCard
+                              key={tie.tieId}
+                              tie={tie}
+                              compact
                               liveScores={mergedScores}
+                              latestCompletedGw={data.latestCompletedGw}
                             />
                           ))}
                         </div>
