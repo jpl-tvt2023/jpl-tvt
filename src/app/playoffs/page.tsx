@@ -354,26 +354,28 @@ function RoundColumn({
   const cachedScores = liveScores ? Object.values(liveScores).flat() : [];
   const mergedScores = [...tempScores, ...cachedScores];
 
-  // Determine the GW for this round (from the first tie)
-  const roundGw = ties[0].gw1;
-  const hasLiveData = mergedScores.some(s => s.gameweek === roundGw);
-  // Show refresh when the round's latest leg is current or future: for 2-leg
-  // ties use gw2 (so QFs at latestCompleted=33 still expose refresh for GW34);
-  // for single-leg use gw1 >= latest (covers in-flight finalizations like
-  // bonus points on the current GW).
-  const roundLatestLeg = ties[0].gw2 ?? roundGw;
+  // Determine the GW for this round (from the first tie). Use tie statuses
+  // (pending → leg1_done → complete) to drive both refresh visibility and the
+  // GW we refresh, so the icon stays visible across the round's full lifecycle
+  // (before leg 1, between legs, during leg 2) without depending on whether
+  // live scores happen to be cached yet.
+  const gw1 = ties[0].gw1;
+  const gw2 = ties[0].gw2 ?? null;
+  const roundActive = ties.some(t => t.status !== "complete");
+  const allLeg1Done = gw2 != null && ties.every(t => t.status === "leg1_done" || t.status === "complete");
+  const targetGw = allLeg1Done ? (gw2 as number) : gw1;
+  const roundLatestLeg = gw2 ?? gw1;
   const isRoundLive = roundLatestLeg >= latestCompletedGw;
-  const isRefreshing = refreshingGw === roundGw;
-  // Fresh = temp scores exist for this GW (user just refreshed)
-  const isFreshlyRefreshed = (tempLiveScores ? Object.keys(tempLiveScores).map(Number) : []).includes(roundGw);
-  
+  const isRefreshing = refreshingGw === targetGw;
+  const isFreshlyRefreshed = (tempLiveScores ? Object.keys(tempLiveScores).map(Number) : []).includes(targetGw);
+
   return (
     <div className={`flex flex-col gap-3 ${className || ""}`}>
       <div className="flex items-center justify-center gap-2">
         <h3 className="text-xs font-bold text-yellow-400 uppercase tracking-wider text-center">{title}</h3>
-        {hasLiveData && onRefreshRound && isRoundLive && (
+        {roundActive && onRefreshRound && isRoundLive && (
           <button
-            onClick={() => onRefreshRound(roundGw)}
+            onClick={() => onRefreshRound(targetGw)}
             disabled={isRefreshing}
             className={`text-green-400 hover:text-green-300 disabled:opacity-50 transition-all text-sm ${isRefreshing ? "animate-spin" : ""}`}
             title="Refresh live scores"
