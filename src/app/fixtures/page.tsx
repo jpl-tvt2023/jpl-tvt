@@ -380,8 +380,10 @@ export default function FixturesPage() {
   const groupAFixtures = selectedFixtures.filter((f: Fixture) => f.group.name === "A");
   const groupBFixtures = selectedFixtures.filter((f: Fixture) => f.group.name === "B");
   
-  const hasResults = selectedFixtures.some((f: Fixture) => f.result);
   const deadline = selectedFixtures[0]?.gameweek?.deadline;
+  const allHaveResults = selectedFixtures.length > 0 && selectedFixtures.every((f: Fixture) => f.result);
+  const deadlinePassed = !!deadline && new Date(deadline) <= new Date();
+  const isInProgress = deadlinePassed && !allHaveResults;
 
   const formatDeadline = (deadline: Date) => {
     const date = new Date(deadline);
@@ -507,11 +509,11 @@ export default function FixturesPage() {
 
             {/* Status Badge */}
             <div className="flex flex-wrap items-center justify-center gap-4 mb-6">
-              {hasResults ? (
+              {allHaveResults ? (
                 <span className="px-4 py-1 rounded-full bg-green-500/20 text-green-400 text-sm font-medium">
                   Results Available
                 </span>
-              ) : isLive ? (
+              ) : isInProgress ? (
                 <span className={`px-4 py-1 rounded-full text-sm font-medium flex items-center gap-2 ${
                   isManuallyRefreshed ? "bg-amber-500/20 text-amber-400" : "bg-white/10 text-gray-300"
                 }`}>
@@ -536,7 +538,7 @@ export default function FixturesPage() {
                   Upcoming
                 </span>
               )}
-              {deadline && !hasResults && !isLive && (
+              {deadline && !allHaveResults && !isInProgress && (
                 <span className="text-sm text-gray-400">Deadline: {formatDeadline(deadline)}</span>
               )}
               {isLive && liveCachedAt && (

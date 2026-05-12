@@ -748,14 +748,14 @@ export default function PlayoffsPage() {
                   ].map(({ key, label, gw, data: roundTies }) => {
                     const ties = roundTies as TieDisplay[];
                     if (!ties || ties.length === 0) return null;
-                    const hasLive = mergedScores.some(s => s.gameweek === gw);
-                    const isRoundLive = gw > data.latestCompletedGw;
+                    const roundActive = ties.some(t => t.status !== "complete");
+                    const isRoundLive = gw >= data.latestCompletedGw;
                     const isRoundRefreshing = refreshing === gw;
                     return (
                       <div key={key}>
                         <div className="flex items-center gap-2 mb-2">
                           <h3 className="text-xs font-bold text-yellow-400 uppercase tracking-wider">{label}</h3>
-                          {hasLive && isRoundLive && (
+                          {roundActive && isRoundLive && (
                             <button
                               onClick={() => handleRefreshRound(gw)}
                               disabled={isRoundRefreshing}
@@ -804,14 +804,14 @@ export default function PlayoffsPage() {
                   ].map(({ key, label, gw, data: roundData }) => {
                     const ties = roundData as TieDisplay[];
                     if (!ties || ties.length === 0) return null;
-                    const hasLive = mergedScores.some(s => s.gameweek === gw);
-                    const isRoundLive = gw > data.latestCompletedGw;
+                    const roundActive = ties.some(t => t.status !== "complete");
+                    const isRoundLive = gw >= data.latestCompletedGw;
                     const isRoundRefreshing = refreshing === gw;
                     return (
                       <div key={key}>
                         <div className="flex items-center gap-2 mb-2">
                           <h3 className="text-xs font-bold text-yellow-400 uppercase tracking-wider">{label}</h3>
-                          {hasLive && isRoundLive && (
+                          {roundActive && isRoundLive && (
                             <button
                               onClick={() => handleRefreshRound(gw)}
                               disabled={isRoundRefreshing}
