@@ -57,32 +57,37 @@ function FixtureCard({
   const [expanded, setExpanded] = useState(false);
   const result = fixture.result;
   const isResult = result !== undefined && result !== null;
-  const isLive = !isResult && !!liveData;
+  // Prefer fresh live data over the DB-locked result whenever it's present
+  // (FPL pushes late bonus-point adjustments after a GW is marked complete;
+  // without this, clicking ⟳ on a Final card has no visible effect).
+  const hasLive = !!liveData;
+  const isLive = !isResult && hasLive;
 
-  const homeScore = isResult ? result.homeScore : liveData?.homeScore;
-  const awayScore = isResult ? result.awayScore : liveData?.awayScore;
+  const homeScore = hasLive ? liveData!.homeScore : result?.homeScore;
+  const awayScore = hasLive ? liveData!.awayScore : result?.awayScore;
   const hasScore = homeScore !== undefined && awayScore !== undefined;
 
   const homeWin = hasScore && homeScore! > awayScore!;
   const awayWin = hasScore && awayScore! > homeScore!;
   const draw = hasScore && homeScore === awayScore;
 
-  // Locked result  → winner green, loser/draw gray (no pulse)
-  // Live fresh     → amber + pulse on both scores
-  // Live stale     → white (no colour, no pulse)
-  const homeScoreClass = isResult
-    ? homeWin ? "text-green-400" : "text-gray-400"
-    : isLive && isFreshlyRefreshed
-      ? "text-amber-400 animate-pulse"
+  // Amber pulse signals a freshly-refreshed score regardless of whether the
+  // fixture is officially Final — gives the user a visible response to ⟳.
+  const showFreshPulse = hasLive && !!isFreshlyRefreshed;
+
+  const homeScoreClass = showFreshPulse
+    ? "text-amber-400 animate-pulse"
+    : isResult
+      ? homeWin ? "text-green-400" : "text-gray-400"
       : "text-white";
 
-  const awayScoreClass = isResult
-    ? awayWin ? "text-green-400" : "text-gray-400"
-    : isLive && isFreshlyRefreshed
-      ? "text-amber-400 animate-pulse"
+  const awayScoreClass = showFreshPulse
+    ? "text-amber-400 animate-pulse"
+    : isResult
+      ? awayWin ? "text-green-400" : "text-gray-400"
       : "text-white";
 
-  const hasPlayerData = isLive
+  const hasPlayerData = hasLive
     ? (liveData?.homePlayers.length ?? 0) > 0
     : !!(fixture.result?.homePlayerScores);
 
@@ -139,12 +144,12 @@ function FixtureCard({
 
       {/* Expandable player breakdown — live and locked results */}
       {(() => {
-        const homePlayers: LivePlayerScore[] = isLive
+        const homePlayers: LivePlayerScore[] = hasLive
           ? (liveData?.homePlayers ?? [])
           : fixture.result?.homePlayerScores
             ? JSON.parse(fixture.result.homePlayerScores)
             : [];
-        const awayPlayers: LivePlayerScore[] = isLive
+        const awayPlayers: LivePlayerScore[] = hasLive
           ? (liveData?.awayPlayers ?? [])
           : fixture.result?.awayPlayerScores
             ? JSON.parse(fixture.result.awayPlayerScores)
