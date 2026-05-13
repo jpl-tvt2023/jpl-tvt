@@ -6,6 +6,9 @@ import { fetchTeamGameweekPicks, fetchLiveGameweek } from "@/lib/fpl";
 import { pickLowestScorerAsCaptain } from "@/lib/scoring";
 import type { LiveFixtureScore, LiveGameweekData } from "@/lib/fpl-cache";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 /**
  * GET /api/fixtures/live/refresh?gameweek=N
  * Force-fetches fresh live scores from FPL API (no caching)

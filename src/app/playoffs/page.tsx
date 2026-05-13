@@ -568,7 +568,10 @@ export default function PlayoffsPage() {
     setRefreshing(gwNumber);
     try {
       try {
-        const res = await fetch(`/api/fixtures/live/refresh?gameweek=${gwNumber}`);
+        const res = await fetch(
+          `/api/fixtures/live/refresh?gameweek=${gwNumber}&t=${Date.now()}`,
+          { cache: "no-store" }
+        );
         if (res.ok) {
           const freshData = await res.json();
           setTempLiveScores(prev => ({

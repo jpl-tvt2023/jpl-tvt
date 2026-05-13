@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 
 interface LivePlayerScore {
@@ -247,9 +247,11 @@ export default function FixturesPage() {
   const [liveCachedAt, setLiveCachedAt] = useState<string | null>(null);
   const [isManuallyRefreshed, setIsManuallyRefreshed] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const lastManualRefreshRef = useRef<number>(0);
 
   // Fetch live scores for selected GW
   const fetchLiveScores = useCallback(async (gw: number) => {
+    if (Date.now() - lastManualRefreshRef.current < 5 * 60 * 1000) return;
     try {
       const res = await fetch(`/api/fixtures/live?gameweek=${gw}`);
       if (res.ok) {
@@ -275,7 +277,10 @@ export default function FixturesPage() {
     if (!selectedGW || isRefreshing) return;
     setIsRefreshing(true);
     try {
-      const res = await fetch(`/api/fixtures/live/refresh?gameweek=${selectedGW}`);
+      const res = await fetch(
+        `/api/fixtures/live/refresh?gameweek=${selectedGW}&t=${Date.now()}`,
+        { cache: "no-store" }
+      );
       if (res.ok) {
         const data = await res.json();
         if (data.fixtures?.length) {
@@ -283,6 +288,7 @@ export default function FixturesPage() {
           setIsLive(true);
           setLiveCachedAt(data.cachedAt || null);
           setIsManuallyRefreshed(true);
+          lastManualRefreshRef.current = Date.now();
         }
       }
     } catch {
