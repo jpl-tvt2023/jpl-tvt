@@ -179,16 +179,24 @@ function MatchCard({
     return null;
   };
 
-  // Prefer fresh live data over the DB-locked leg score so the header total
-  // agrees with the player breakdown after a manual refresh (e.g. FPL pushed
-  // late bonus points after the GW was already marked complete).
+  // Derive the team total from the same player array we render below the
+  // header, so the displayed total cannot disagree with the displayed rows.
+  // (Backstop against any path where liveFixture.homeScore is out of sync
+  // with liveFixture.homePlayers — e.g. stale DB result with refreshed
+  // player JSON.) Falls through to liveFixture.homeScore, then the
+  // DB-locked stored score, only when no player breakdown is available.
   const resolveLegScore = (
     side: TeamSide | null,
     liveFixture: LiveFixtureScore | undefined,
     storedScore: number | null,
   ): number | null => {
+    const players = getPlayersForSide(side, liveFixture);
+    if (players.length > 0) {
+      return players.reduce((sum, p) => sum + p.finalScore, 0);
+    }
     const live = getLiveScore(side, liveFixture);
-    return live != null ? live : storedScore;
+    if (live != null) return live;
+    return storedScore;
   };
 
   // Get players for a given side (home/away in the TIE) from a live fixture
@@ -458,6 +466,10 @@ function SurvivalTable({
           <tbody>
             {entries.map((e, i) => {
               const hasPlayers = (e.players?.length ?? 0) > 0;
+              // Defensive: displayed total IS the sum of the rendered rows.
+              const displayedScore = hasPlayers
+                ? e.players!.reduce((sum, p) => sum + p.finalScore, 0)
+                : e.score;
               const isExpanded = hasPlayers && expandedTeam === e.teamId;
               const advances = i < 8;
               const eliminated = i >= entries.length - 3;
@@ -477,7 +489,7 @@ function SurvivalTable({
                     </td>
                     <td className="px-3 py-1.5 text-right tabular-nums text-white">
                       <span className="inline-flex items-center gap-2 justify-end">
-                        {e.score || "–"}
+                        {displayedScore || "–"}
                         {hasPlayers && (
                           <span className="text-gray-500 text-[10px]">{isExpanded ? "▲" : "▼"}</span>
                         )}
