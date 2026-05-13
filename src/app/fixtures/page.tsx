@@ -63,8 +63,27 @@ function FixtureCard({
   const hasLive = !!liveData;
   const isLive = !isResult && hasLive;
 
-  const homeScore = hasLive ? liveData!.homeScore : result?.homeScore;
-  const awayScore = hasLive ? liveData!.awayScore : result?.awayScore;
+  // Resolve the player arrays once so the header total and the expanded
+  // breakdown can never disagree — the displayed score IS the sum of the
+  // displayed rows. liveData wins when present; otherwise parse the stored
+  // result JSON.
+  const homePlayers: LivePlayerScore[] = hasLive
+    ? (liveData?.homePlayers ?? [])
+    : fixture.result?.homePlayerScores
+      ? JSON.parse(fixture.result.homePlayerScores) as LivePlayerScore[]
+      : [];
+  const awayPlayers: LivePlayerScore[] = hasLive
+    ? (liveData?.awayPlayers ?? [])
+    : fixture.result?.awayPlayerScores
+      ? JSON.parse(fixture.result.awayPlayerScores) as LivePlayerScore[]
+      : [];
+
+  const homeScore = homePlayers.length > 0
+    ? homePlayers.reduce((s, p) => s + p.finalScore, 0)
+    : hasLive ? liveData?.homeScore : result?.homeScore;
+  const awayScore = awayPlayers.length > 0
+    ? awayPlayers.reduce((s, p) => s + p.finalScore, 0)
+    : hasLive ? liveData?.awayScore : result?.awayScore;
   const hasScore = homeScore !== undefined && awayScore !== undefined;
 
   const homeWin = hasScore && homeScore! > awayScore!;
@@ -87,9 +106,7 @@ function FixtureCard({
       ? awayWin ? "text-green-400" : "text-gray-400"
       : "text-white";
 
-  const hasPlayerData = hasLive
-    ? (liveData?.homePlayers.length ?? 0) > 0
-    : !!(fixture.result?.homePlayerScores);
+  const hasPlayerData = homePlayers.length > 0;
 
   return (
     <div
@@ -144,16 +161,6 @@ function FixtureCard({
 
       {/* Expandable player breakdown — live and locked results */}
       {(() => {
-        const homePlayers: LivePlayerScore[] = hasLive
-          ? (liveData?.homePlayers ?? [])
-          : fixture.result?.homePlayerScores
-            ? JSON.parse(fixture.result.homePlayerScores)
-            : [];
-        const awayPlayers: LivePlayerScore[] = hasLive
-          ? (liveData?.awayPlayers ?? [])
-          : fixture.result?.awayPlayerScores
-            ? JSON.parse(fixture.result.awayPlayerScores)
-            : [];
         const gwNumber = liveData?.gameweek ?? fixture.gameweek.number;
         if (homePlayers.length === 0) return null;
         return (
