@@ -179,6 +179,18 @@ function MatchCard({
     return null;
   };
 
+  // Prefer fresh live data over the DB-locked leg score so the header total
+  // agrees with the player breakdown after a manual refresh (e.g. FPL pushed
+  // late bonus points after the GW was already marked complete).
+  const resolveLegScore = (
+    side: TeamSide | null,
+    liveFixture: LiveFixtureScore | undefined,
+    storedScore: number | null,
+  ): number | null => {
+    const live = getLiveScore(side, liveFixture);
+    return live != null ? live : storedScore;
+  };
+
   // Get players for a given side (home/away in the TIE) from a live fixture
   const getPlayersForSide = (side: TeamSide | null, liveFixture: LiveFixtureScore | undefined) => {
     if (!liveFixture || !side?.abbr) return [];
@@ -226,22 +238,22 @@ function MatchCard({
           is2Leg ? (
             <div className="flex gap-2 text-xs tabular-nums">
               <span className={`w-5 text-center ${showLiveLeg1 ? (isFreshlyRefreshed ? "text-amber-400 animate-pulse" : "text-white") : ""}`}>
-                {showLiveLeg1 ? getLiveScore(tie.home, liveScoreLeg1) ?? "–" : (tie.home?.leg1Score ?? "–")}
+                {resolveLegScore(tie.home, liveScoreLeg1, tie.home?.leg1Score ?? null) ?? "–"}
               </span>
               <span className={`w-5 text-center ${showLiveLeg2 ? (isFreshlyRefreshed ? "text-amber-400 animate-pulse" : "text-white") : ""}`}>
-                {showLiveLeg2 ? getLiveScore(tie.home, liveScoreLeg2) ?? "–" : (tie.home?.leg2Score ?? "–")}
+                {resolveLegScore(tie.home, liveScoreLeg2, tie.home?.leg2Score ?? null) ?? "–"}
               </span>
               <span className="w-6 text-center font-bold border-l border-white/20 pl-1">
                 {(() => {
-                  const leg1Val = showLiveLeg1 ? (getLiveScore(tie.home, liveScoreLeg1) ?? 0) : (tie.home?.leg1Score ?? 0);
-                  const leg2Val = showLiveLeg2 ? (getLiveScore(tie.home, liveScoreLeg2) ?? 0) : (tie.home?.leg2Score ?? 0);
+                  const leg1Val = resolveLegScore(tie.home, liveScoreLeg1, tie.home?.leg1Score ?? null) ?? 0;
+                  const leg2Val = resolveLegScore(tie.home, liveScoreLeg2, tie.home?.leg2Score ?? null) ?? 0;
                   return leg1Val + leg2Val;
                 })()}
               </span>
             </div>
           ) : (
             <span className={`text-xs tabular-nums w-5 text-center ${showLive ? (isFreshlyRefreshed ? "text-amber-400 animate-pulse" : "text-white") : ""}`}>
-              {showLive ? getLiveScore(tie.home, liveScoreLeg1) ?? "–" : (tie.home?.leg1Score ?? "–")}
+              {resolveLegScore(tie.home, liveScoreLeg1, tie.home?.leg1Score ?? null) ?? "–"}
             </span>
           )
         )}
@@ -254,22 +266,22 @@ function MatchCard({
           is2Leg ? (
             <div className="flex gap-2 text-xs tabular-nums">
               <span className={`w-5 text-center ${showLiveLeg1 ? (isFreshlyRefreshed ? "text-amber-400 animate-pulse" : "text-white") : ""}`}>
-                {showLiveLeg1 ? getLiveScore(tie.away, liveScoreLeg1) ?? "–" : (tie.away?.leg1Score ?? "–")}
+                {resolveLegScore(tie.away, liveScoreLeg1, tie.away?.leg1Score ?? null) ?? "–"}
               </span>
               <span className={`w-5 text-center ${showLiveLeg2 ? (isFreshlyRefreshed ? "text-amber-400 animate-pulse" : "text-white") : ""}`}>
-                {showLiveLeg2 ? getLiveScore(tie.away, liveScoreLeg2) ?? "–" : (tie.away?.leg2Score ?? "–")}
+                {resolveLegScore(tie.away, liveScoreLeg2, tie.away?.leg2Score ?? null) ?? "–"}
               </span>
               <span className="w-6 text-center font-bold border-l border-white/20 pl-1">
                 {(() => {
-                  const leg1Val = showLiveLeg1 ? (getLiveScore(tie.away, liveScoreLeg1) ?? 0) : (tie.away?.leg1Score ?? 0);
-                  const leg2Val = showLiveLeg2 ? (getLiveScore(tie.away, liveScoreLeg2) ?? 0) : (tie.away?.leg2Score ?? 0);
+                  const leg1Val = resolveLegScore(tie.away, liveScoreLeg1, tie.away?.leg1Score ?? null) ?? 0;
+                  const leg2Val = resolveLegScore(tie.away, liveScoreLeg2, tie.away?.leg2Score ?? null) ?? 0;
                   return leg1Val + leg2Val;
                 })()}
               </span>
             </div>
           ) : (
             <span className={`text-xs tabular-nums w-5 text-center ${showLive ? (isFreshlyRefreshed ? "text-amber-400 animate-pulse" : "text-white") : ""}`}>
-              {showLive ? getLiveScore(tie.away, liveScoreLeg1) ?? "–" : (tie.away?.leg1Score ?? "–")}
+              {resolveLegScore(tie.away, liveScoreLeg1, tie.away?.leg1Score ?? null) ?? "–"}
             </span>
           )
         )}
