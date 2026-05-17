@@ -449,10 +449,6 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           .where(eq(challengerSurvivalEntries.gameweekId, gameweek.id));
       }
 
-      // Clear the FPL score cache for this GW so reprocessing fetches fresh
-      // data from the FPL API (avoids stale 0s cached pre-match).
-      await clearGameweekCache(gameweekNumber);
-
       // Dedupe captain rows: a team can accumulate multiple gameweekCaptains
       // rows for the same GW when an auto-assigned row (isValid=false) predates
       // a later import-captains insert (different playerId, same team). Only
@@ -499,6 +495,13 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         gameweek.captains = updatedGameweek.captains;
       }
     }
+
+    // Clear the per-player 24h FPL score cache for this GW so the score-fetch
+    // loop below always reads fresh data from FPL. Without this, stale zeros
+    // cached pre-match (when entry_history.points = 0) would be persisted
+    // into the results table when admin processes scores while matches are
+    // in-progress.
+    await clearGameweekCache(gameweekNumber);
 
     // Filter only unprocessed fixtures
     const unprocessedFixtures = gameweek.fixtures.filter(f => !f.result);
