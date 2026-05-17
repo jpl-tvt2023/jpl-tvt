@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, gameweeks, fixtures, results, teams, gameweekCaptains, players } from "@/lib/db";
 import { eq, asc, and } from "drizzle-orm";
-import { clearLiveCache, setLiveCachedScores } from "@/lib/fpl-cache";
+import { clearGameweekCache, clearLiveCache, setLiveCachedScores } from "@/lib/fpl-cache";
 import { detectLiveGameweek, fetchTeamGameweekPicks } from "@/lib/fpl";
 import { pickLowestScorerAsCaptain } from "@/lib/scoring";
 
@@ -65,12 +65,16 @@ export async function GET(request: NextRequest) {
       // Continue with processing even if live cache fails
     }
 
-    // Clear live cache for this gameweek before processing final scores
+    // Clear both live cache (10m fixture rollup) and per-player 24h cache
+    // before processing. The per-player cache is critical: if it still holds
+    // pre-match zeros, the gameweek processor will persist those zeros into
+    // the results table even though FPL now has real scores.
     try {
       await clearLiveCache(targetGW);
-      console.log(`Cron: Cleared live cache for GW${targetGW}`);
+      await clearGameweekCache(targetGW);
+      console.log(`Cron: Cleared live + per-player FPL cache for GW${targetGW}`);
     } catch (e) {
-      console.error(`Cron: Failed to clear live cache for GW${targetGW}:`, e);
+      console.error(`Cron: Failed to clear caches for GW${targetGW}:`, e);
     }
 
     // Call the existing gameweek processing endpoint internally
