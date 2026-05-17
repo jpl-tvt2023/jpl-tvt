@@ -115,13 +115,22 @@ import { db, gameweeks, fixtures, results } from "./db";
 import { eq, and, isNull, asc, inArray } from "drizzle-orm";
 
 /**
- * Calculate total gameweek score for an FPL team
- * Returns the points minus transfer hits
- * Uses cache to avoid hitting FPL API rate limits
+ * Calculate total gameweek score for an FPL team.
+ * Returns FPL points (after picks×multipliers, with VC activation) and the
+ * separate transfer-hit cost.
+ *
+ * Computes from /event/{gw}/live/ element stats rather than
+ * picks.entry_history.points, because FPL updates entry_history on a long
+ * delay during in-progress gameweeks — relying on it caused all GW37 score
+ * processing to persist zeros while matches were live.
+ *
+ * Pass `preFetchedLive` when calling in a loop to avoid one FPL live fetch
+ * per FPL team (the /event/{gw}/live/ payload is large).
  */
 export async function calculateTeamGameweekScore(
   teamId: string,
-  gameweek: number
+  gameweek: number,
+  preFetchedLive?: FPLLiveData,
 ): Promise<{ points: number; transferHits: number; netScore: number }> {
   // Check cache first
   const cached = await getCachedScore(teamId, gameweek);
@@ -133,14 +142,28 @@ export async function calculateTeamGameweekScore(
     };
   }
 
-  // Fetch from FPL API
+  const liveData = preFetchedLive ?? (await fetchLiveGameweek(gameweek));
+  const liveElementsMap = new Map(liveData.elements.map((e) => [e.id, e]));
   const picks = await fetchTeamGameweekPicks(teamId, gameweek);
-  
-  const score = {
-    points: picks.entry_history.points,
-    transferHits: picks.entry_history.event_transfers_cost,
-    netScore: picks.entry_history.points - picks.entry_history.event_transfers_cost,
-  };
+
+  const captainPick = picks.picks.find((p) => p.is_captain);
+  const captainLive = captainPick ? liveElementsMap.get(captainPick.element) : null;
+  const captainPlayed = captainLive ? captainLive.stats.minutes > 0 : false;
+
+  let points = 0;
+  for (const pick of picks.picks) {
+    const liveElement = liveElementsMap.get(pick.element);
+    if (!liveElement) continue;
+    let multiplier = pick.multiplier;
+    if (!captainPlayed) {
+      if (pick.is_captain) multiplier = 0;
+      else if (pick.is_vice_captain) multiplier = captainPick?.multiplier ?? 2;
+    }
+    if (multiplier > 0) points += liveElement.stats.total_points * multiplier;
+  }
+
+  const transferHits = picks.entry_history.event_transfers_cost;
+  const score = { points, transferHits, netScore: points - transferHits };
 
   // Cache the result
   await setCachedScore(teamId, gameweek, score);

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, gameweeks, fixtures, teams, players, groups, results, gameweekCaptains, gameweekChips, auditLogs, type Gameweek, type Fixture, type Team, type Player, type Group, type Result, type GameweekCaptain, type GameweekChip } from "@/lib/db";
 import { challengerSurvivalEntries } from "@/lib/db/schema";
-import { calculateTeamGameweekScore } from "@/lib/fpl";
+import { calculateTeamGameweekScore, fetchLiveGameweek } from "@/lib/fpl";
 import { calculateTVTTeamScore, determineMatchResult } from "@/lib/scoring";
 import { getTop2FromGroup } from "@/lib/chip-validation";
 import { getAllCachedScores, clearGameweekCache } from "@/lib/fpl-cache";
@@ -255,6 +255,9 @@ async function processChallengerSurvival(
   const allCaptains = await db.select().from(gameweekCaptains)
     .where(eq(gameweekCaptains.gameweekId, gw33Id));
 
+  // One live-element fetch for the whole survival pass.
+  const liveData = await fetchLiveGameweek(gwNumber);
+
   for (const entry of entries) {
     const teamRow = await db.query.teams.findFirst({
       where: eq(teams.id, entry.teamId),
@@ -268,7 +271,7 @@ async function processChallengerSurvival(
     // Pass 1: fetch per-player FPL scores.
     const fetched = await Promise.all(teamPlayers.map(async (p) => {
       try {
-        const res = await calculateTeamGameweekScore(p.fplId, gwNumber);
+        const res = await calculateTeamGameweekScore(p.fplId, gwNumber, liveData);
         return { p, points: res.points, transferHits: res.transferHits };
       } catch (err) {
         console.error(`Survival score fetch failed for fplId ${p.fplId} GW${gwNumber}:`, err);
@@ -537,6 +540,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     // Key: groupId, Value: array of { teamId, margin, fixtureId, usedDoublePointer }
     const groupMargins: Map<string, { teamId: string; margin: number; fixtureId: string; resultId: string; usedDoublePointer: boolean }[]> = new Map();
 
+    // Fetch /event/{gw}/live/ once for the whole processing pass — every
+    // calculateTeamGameweekScore call below now derives points from these
+    // element stats (entry_history.points is unreliable during live GWs).
+    const liveData = await fetchLiveGameweek(gameweekNumber);
+
     // Process each fixture
     for (const fixture of unprocessedFixtures) {
       try {
@@ -551,14 +559,14 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         // Fetch FPL scores for all players (captain flag set after default assignment)
         const homeScoresRaw = await Promise.all(
           fixture.homeTeam.players.map(async (player: Player) => {
-            const score = await calculateTeamGameweekScore(player.fplId, gameweekNumber);
+            const score = await calculateTeamGameweekScore(player.fplId, gameweekNumber, liveData);
             return { playerId: player.id, playerName: player.name, ...score };
           })
         );
 
         const awayScoresRaw = await Promise.all(
           fixture.awayTeam.players.map(async (player: Player) => {
-            const score = await calculateTeamGameweekScore(player.fplId, gameweekNumber);
+            const score = await calculateTeamGameweekScore(player.fplId, gameweekNumber, liveData);
             return { playerId: player.id, playerName: player.name, ...score };
           })
         );
@@ -1054,10 +1062,10 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           (c: GameweekCaptain) => challengedTeam.players.some((p: Player) => p.id === c.playerId)
         );
 
-        // Fetch FPL scores for challenger team
+        // Fetch FPL scores for challenger team (reuse the live data fetched above)
         const challengerScores = await Promise.all(
           challengerTeam.players.map(async (player: Player) => {
-            const score = await calculateTeamGameweekScore(player.fplId, gameweekNumber);
+            const score = await calculateTeamGameweekScore(player.fplId, gameweekNumber, liveData);
             return {
               playerId: player.id,
               isCaptain: challengerCaptain?.playerId === player.id,
@@ -1069,7 +1077,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         // Fetch FPL scores for challenged team
         const challengedScores = await Promise.all(
           challengedTeam.players.map(async (player: Player) => {
-            const score = await calculateTeamGameweekScore(player.fplId, gameweekNumber);
+            const score = await calculateTeamGameweekScore(player.fplId, gameweekNumber, liveData);
             return {
               playerId: player.id,
               isCaptain: challengedCaptain?.playerId === player.id,
